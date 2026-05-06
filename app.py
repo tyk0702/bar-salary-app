@@ -32,7 +32,7 @@ if mode == "日々の入力をする":
                 st.error("名前を入力してください")
             else:
                 # 新しいフォームの送信先URL
-                form_url = "https://docs.google.com/forms/d/e/1FAIpQLSdO7S26lMv0P0T9N8Z1iFh6D_4A7f98T2v9V0D-x_X_L8X-Qw/formResponse"
+                form_url = "https://docs.google.com/forms/d/e/1FAIpQLScNydbSJ03cCZd4_rs56zaq-CDSqRa5wVp5d_D1nqZTkYZ7Cg/formResponse"
                 
                 # 新しいフォームから抜き出した最新ID
                 params = {
