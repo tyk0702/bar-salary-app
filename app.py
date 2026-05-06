@@ -82,13 +82,16 @@ elif mode == "1週間の集計を出す":
         final_df = pd.DataFrame()
         
         # 1. タイムスタンプと日付の取得（形式を問わず無理やり変換）
+       # 1. タイムスタンプと日付の取得（形式を問わず無理やり変換）
+        # dayfirst=True を試したり、複数の形式を自動判別させます
         ts_raw = pd.to_datetime(df.iloc[:, 0], errors='coerce')
         
         if cols_count > 1:
-            # B列を日付として変換。dayfirst=False, yearfirst=Trueなど柔軟に対応
-            date_raw = pd.to_datetime(df.iloc[:, 1], errors='coerce')
-            # B列が空ならA列（タイムスタンプ）を使う
-            final_df['確定日付'] = date_raw.fillna(ts_raw)
+            # どんな書き方（2026/5/10, 26-05-10, 5月10日など）でも極力読み取る設定
+            date_raw = pd.to_datetime(df.iloc[:, 1], errors='coerce', dayfirst=False)
+            
+            # もしB列（日付）が空、または変換に失敗(NaT)していたらA列（タイムスタンプ）を使う
+            final_df['確定日付'] = date_raw.where(date_raw.notnull(), ts_raw)
         else:
             final_df['確定日付'] = ts_raw
             
