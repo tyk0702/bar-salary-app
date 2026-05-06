@@ -34,21 +34,21 @@ if submitted:
             else:
                 form_url = "https://docs.google.com/forms/d/e/1FAIpQLSc8Ost1yA_FAtXskdxt_8twu6vigBE3FEXBkH8Hw8rF8FRikw/formResponse"
                 
-                # 日付を文字列（YYYY-MM-DD）として送信
+                # 文字列として安全に送る
                 params = {
-                    "entry.474978113": name,
-                    "entry.223259871": hourly_rate,
-                    "entry.1496582745": hours,
-                    "entry.640486226": sales,
-                    "entry.1975425774": comm_rate,
-                    "entry.480614532": input_date.strftime("%Y-%m-%d") # 記述式ならこれで届く
+                    "entry.474978113": str(name),
+                    "entry.223259871": str(hourly_rate),
+                    "entry.1496582745": str(hours),
+                    "entry.640486226": str(sales),
+                    "entry.1975425774": str(comm_rate),
+                    "entry.480614532": input_date.strftime("%Y-%m-%d") # ここがB列に届くはず
                 }
                 
                 query_string = urllib.parse.urlencode(params)
                 complete_url = f"{form_url}?{query_string}&submit=Submit"
                 
-                st.success("✅ 送信データの準備完了！")
-                st.link_button("🚀 確定してスプレッドシートに保存", complete_url)
+                st.success("✅ 送信ボタンを準備しました")
+                st.link_button("🚀 スプレッドシートに保存（ここを必ずクリック）", complete_url)
 
 # ---------------------------------------------------------
 # モード2：1週間の集計を出す
