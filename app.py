@@ -35,7 +35,7 @@ if mode == "日々の入力をする":
             if name == "":
                 st.error("名前を入力してください！")
             else:
-                form_url = "https://docs.google.com/forms/d/e/1FAIpQLSc8Ost1yA_FAtXskdxt_8twu6vigBE3FEXBkH8Hw8rF8FRikw/formResponse"
+                form_url = "https://docs.google.com/spreadsheets/d/1K32fgzIBW-qATIccpb-C7gP0L-lmqMZN7QpLgvvNMH4/edit?resourcekey=&gid=227199736#gid=227199736"
                 
                 params = {
                     "entry.474978113": name,
