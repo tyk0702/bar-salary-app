@@ -13,11 +13,13 @@ mode = st.sidebar.radio("機能を選択", ["日々の入力をする", "1週間
 # ---------------------------------------------------------
 # モード1：日々の入力をする
 # ---------------------------------------------------------
+# ---------------------------------------------------------
+# モード1：日々の入力をする
+# ---------------------------------------------------------
 if mode == "日々の入力をする":
     st.title("📝 今日の出勤データを記入")
     
     with st.form("input_form", clear_on_submit=True):
-        # カレンダーで日付を選択（一昨日の分などもここで指定可能）
         input_date = st.date_input("日付", datetime.now())
         name = st.text_input("名前（スタッフ名）")
         hourly_rate = st.number_input("基本時給", value=1200)
@@ -27,7 +29,7 @@ if mode == "日々の入力をする":
         
         submitted = st.form_submit_button("データを保存する")
         
-       if submitted:
+        if submitted:
             if name == "":
                 st.error("名前を入力してください！")
             else:
@@ -49,7 +51,7 @@ if mode == "日々の入力をする":
                     # 3. 既存のデータと新しい行を結合
                     updated_df = pd.concat([existing_data, new_row_df], ignore_index=True)
                     
-                    # 4. スプレッドシート全体を更新（これが最もエラーが少ない方法です）
+                    # 4. スプレッドシート全体を更新
                     conn.update(data=updated_df)
                     
                     st.cache_data.clear()
