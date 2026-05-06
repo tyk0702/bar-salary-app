@@ -2,9 +2,8 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
-import requests
 
-# --- Googleスプレッドシートへの接続設定（読み込み用） ---
+# --- Googleスプレッドシートへの接続設定 ---
 conn = st.connection("google_sheets", type=GSheetsConnection)
 
 # --- サイドバー ---
@@ -17,12 +16,9 @@ mode = st.sidebar.radio("機能を選択", ["日々の入力をする", "1週間
 if mode == "日々の入力をする":
     st.title("📝 今日の出勤データを記入")
     
-    # 成功メッセージを表示するためのフラグ
-    success_flag = False
-    saved_name = ""
-
     with st.form("input_form", clear_on_submit=True):
-        date = st.date_input("日付", datetime.now())
+        # カレンダーで日付を選択（一昨日の分などもここで指定可能）
+        input_date = st.date_input("日付", datetime.now())
         name = st.text_input("名前（スタッフ名）")
         hourly_rate = st.number_input("基本時給", value=1200)
         hours = st.number_input("勤務時間", value=0.0, step=0.5)
@@ -35,31 +31,28 @@ if mode == "日々の入力をする":
             if name == "":
                 st.error("名前を入力してください！")
             else:
-                form_url = "https://docs.google.com/forms/d/e/1FAIpQLSc8Ost1yA_FAtXskdxt_8twu6vigBE3FEXBkH8Hw8rF8FRikw/formResponse"
-                params = {
-                    "entry.474978113": name,
-                    "entry.223259871": hourly_rate,
-                    "entry.1496582745": hours,
-                    "entry.640486226": sales,
-                    "entry.1975425774": comm_rate,
-                }
-                
                 try:
-                    response = requests.post(form_url, data=params)
-                    if response.status_code == 200:
-                        success_flag = True
-                        saved_name = name
-                        # 送信直後にキャッシュをクリア
-                        st.cache_data.clear()
-                    else:
-                        st.error("送信に失敗しました。フォームの設定を確認してください。")
+                    # スプレッドシートの各列に対応するデータリストを作成
+                    # A:タイムスタンプ, B:日付, C:名前, D:時給, E:時間, F:売上, G:歩合
+                    new_row = [
+                        datetime.now().strftime("%Y/%m/%d %H:%M:%S"),
+                        input_date.strftime("%Y/%m/%d"),
+                        name,
+                        hourly_rate,
+                        hours,
+                        sales,
+                        comm_rate
+                    ]
+                    
+                    # 直接スプレッドシートに書き込み
+                    # ※ data=[new_row] とリストのリストで渡すのがポイントです
+                    conn.create(data=[new_row])
+                    
+                    st.cache_data.clear()
+                    st.success(f"{name}さんのデータを保存しました！")
+                    st.balloons()
                 except Exception as e:
-                    st.error(f"エラーが発生しました: {e}")
-
-    # エラー回避のため、フォームの外でメッセージとバルーンを出す
-    if success_flag:
-        st.success(f"{saved_name}さんのデータを保存しました！")
-        st.balloons()
+                    st.error(f"保存に失敗しました。スプレッドシートの権限（編集者になっているか）を確認してください: {e}")
 
 # ---------------------------------------------------------
 # モード2：1週間の集計を出す
@@ -79,15 +72,12 @@ elif mode == "1週間の集計を出す":
         processed_rows = []
 
         for i in range(len(df)):
-            # row = df.iloc[i] ではなく、値を直接取得するように変更
-            
-            # --- 日付の解析 (0番目がタイムスタンプ、1番目が日付) ---
-            # .iat[i, 列番号] を使うことで、KeyErrorを物理的に回避します
             try:
+                # 0番目がタイムスタンプ、1番目が選択した日付
                 raw_ts = str(df.iat[i, 0])
                 raw_date = str(df.iat[i, 1]) if cols_count > 1 else ""
                 
-                # 日付変換
+                # B列（日付）を優先、なければA列（TS）
                 parsed_date = pd.to_datetime(raw_date, errors='coerce')
                 if pd.isna(parsed_date):
                     parsed_date = pd.to_datetime(raw_ts, errors='coerce')
@@ -95,7 +85,6 @@ elif mode == "1週間の集計を出す":
                 if pd.isna(parsed_date):
                     continue
                     
-                # --- データの抽出 (位置で指定) ---
                 processed_rows.append({
                     '確定日付': parsed_date,
                     '名前': str(df.iat[i, 2]) if cols_count > 2 else "不明",
@@ -104,18 +93,15 @@ elif mode == "1週間の集計を出す":
                     '個人売上': pd.to_numeric(str(df.iat[i, 5]).replace(',', ''), errors='coerce') or 0,
                     '歩合率': pd.to_numeric(str(df.iat[i, 6]).replace(',', ''), errors='coerce') or 0
                 })
-            except Exception as e:
-                # 1行失敗しても次に進む
+            except:
                 continue
 
         final_df = pd.DataFrame(processed_rows)
 
         if final_df.empty:
             st.error("有効なデータが1件も見つかりませんでした。")
-            with st.expander("読み込んだ列名を確認"):
-                st.write(list(df.columns))
         else:
-            # 週の計算
+            # 週の計算（日曜始まり）
             final_df['週開始'] = final_df['確定日付'].apply(lambda x: x - pd.Timedelta(days=(x.weekday() + 1) % 7))
             final_df['週ラベル'] = final_df['週開始'].dt.strftime('%Y-%m-%d (日)〜')
 
@@ -127,7 +113,6 @@ elif mode == "1週間の集計を出す":
             week_df = final_df[final_df['週ラベル'] == selected_week].copy()
 
             if not week_df.empty:
-                # 計算（エラーが出にくいよう型を明示）
                 week_df['時給計算'] = week_df['時給'].astype(float) * week_df['勤務時間'].astype(float)
                 week_df['歩合計算'] = week_df['個人売上'].astype(float) * week_df['歩合率'].astype(float)
                 
@@ -140,7 +125,6 @@ elif mode == "1週間の集計を出す":
 
                 st.dataframe(summary)
                 
-                # 詳細表示
                 st.divider()
                 target_staff = st.selectbox("詳細を確認するスタッフ", summary['名前'])
                 p = summary[summary['名前'] == target_staff].iloc[0]
