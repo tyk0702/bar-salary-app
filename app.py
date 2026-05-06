@@ -68,66 +68,79 @@ if mode == "日々の入力をする":
 elif mode == "1週間の集計を出す":
     st.title("📊 スタッフ別・週次集計")
     
+    # データの読み込み
     df = conn.read(ttl=0) 
     
     if df is not None and not df.empty:
-        # 【修正】列名を強制的に整える（1列目:タイムスタンプ, 2列目:名前 ...）
-        # 列数が足りない場合のエラーを回避
-        new_cols = ['タイムスタンプ', '名前', '時給', '勤務時間', '個人売上', '歩合率']
-        current_cols = list(df.columns)
+        # --- 列名の整理 ---
+        # フォームからの入力で列名が変わっても対応できるように強制代入
+        standard_cols = ['タイムスタンプ', '名前', '時給', '勤務時間', '個人売上', '歩合率']
+        # 現在の列名を取得
+        actual_cols = list(df.columns)
         
-        # 存在する列数分だけ名前を上書きする
-        rename_dict = {current_cols[i]: new_cols[i] for i in range(min(len(current_cols), len(new_cols)))}
-        df = df.rename(columns=rename_dict)
+        # 存在する列の数だけ名前を付け直す
+        new_columns = {}
+        for i in range(min(len(actual_cols), len(standard_cols))):
+            new_columns[actual_cols[i]] = standard_cols[i]
+        
+        df = df.rename(columns=new_columns)
 
+        # --- 型の変換とクリーニング ---
         # 日付変換
         df['タイムスタンプ'] = pd.to_datetime(df['タイムスタンプ'], errors='coerce')
-        df = df.dropna(subset=['タイムスタンプ']) # 日付がない行は消す
+        df = df.dropna(subset=['タイムスタンプ']) 
         
-        # 週の計算
+        # 数値変換（より安全な方法に変更）
+        num_cols = ['時給', '勤務時間', '個人売上', '歩合率']
+        for col in num_cols:
+            if col in df.columns:
+                # 1つずつ値を数値に変換し、失敗したら0にする
+                df[col] = df[col].apply(pd.to_numeric, errors='coerce').fillna(0)
+            else:
+                df[col] = 0
+
+        # --- 週の計算 ---
         df['週'] = df['タイムスタンプ'].apply(lambda x: x - pd.Timedelta(days=(x.weekday() + 1) % 7))
         df['週'] = df['週'].dt.strftime('%Y-%m-%d (日)〜')
 
         week_list = sorted(df['週'].unique(), reverse=True)
         selected_week = st.selectbox("集計する週を選択してください", week_list)
+        
+        # 選択された週のデータを抽出
         week_df = df[df['週'] == selected_week].copy()
 
-        st.write(f"### {selected_week} の集計")
+        if not week_df.empty:
+            st.write(f"### {selected_week} の集計")
 
-        # 【重要修正】数値変換を安全に行う
-        for col in ['時給', '勤務時間', '個人売上', '歩合率']:
-            if col in week_df.columns:
-                # 1列ずつ確実にシリーズ（列データ）として渡す
-                week_df[col] = pd.to_numeric(week_df.loc[:, col], errors='coerce').fillna(0)
-            else:
-                week_df[col] = 0  # 列がなければ0で埋める
-
-        # 集計計算
-        week_df['時給計算'] = week_df['時給'] * week_df['勤務時間']
-        week_df['歩合計算'] = week_df['個人売上'] * week_df['歩合率']
-        
-        # 名前がない行を除外して集計
-        if '名前' in week_df.columns:
-            staff_summary = week_df.groupby('名前').agg({
-                '勤務時間': 'sum', '個人売上': 'sum', '時給計算': 'sum', '歩合計算': 'sum'
+            # --- 計算処理 ---
+            week_df['時給計算'] = week_df['時給'] * week_df['勤務時間']
+            week_df['歩合計算'] = week_df['個人売上'] * week_df['歩合率']
+            
+            # スタッフごとに合計
+            summary = week_df.groupby('名前').agg({
+                '勤務時間': 'sum', 
+                '個人売上': 'sum', 
+                '時給計算': 'sum', 
+                '歩合計算': 'sum'
             }).reset_index()
 
-            staff_summary['最終支給額'] = staff_summary.apply(lambda x: max(x['時給計算'], x['歩合計算']), axis=1)
-            staff_summary['計算方法'] = staff_summary.apply(lambda x: "歩合" if x['歩合計算'] > x['時給計算'] else "時給保障", axis=1)
+            # 給料の決定（高い方を採用）
+            summary['最終支給額'] = summary.apply(lambda x: max(x['時給計算'], x['歩合計算']), axis=1)
+            summary['計算方法'] = summary.apply(lambda x: "歩合" if x['歩合計算'] > x['時給計算'] else "時給保障", axis=1)
 
-            st.dataframe(staff_summary[['名前', '勤務時間', '個人売上', '最終支給額', '計算方法']])
+            # 表示
+            st.dataframe(summary[['名前', '勤務時間', '個人売上', '最終支給額', '計算方法']])
 
             st.divider()
-            target_staff = st.selectbox("詳細を確認するスタッフ", staff_summary['名前'])
-            personal_data = staff_summary[staff_summary['名前'] == target_staff].iloc[0]
+            target_staff = st.selectbox("詳細を確認するスタッフ", summary['名前'])
+            personal = summary[summary['名前'] == target_staff].iloc[0]
                 
             st.write(f"#### {target_staff} さんの詳細")
             c1, c2, c3 = st.columns(3)
-            c1.metric("実働合計", f"{personal_data['勤務時間']}h")
-            c2.metric("売上合計", f"{int(personal_data['個人売上']):,}円")
-            c3.metric("確定給料", f"{int(personal_data['最終支給額']):,}円")
+            c1.metric("実働合計", f"{personal['勤務時間']}h")
+            c2.metric("売上合計", f"{int(personal['個人売上']):,}円")
+            c3.metric("確定給料", f"{int(personal['最終支給額']):,}円")
         else:
-            st.error("スプレッドシートに '名前' のデータが見つかりません。")
-
+            st.info("選択された週にデータはありません。")
     else:
-        st.warning("まだデータが読み込めません。フォームから1件テスト送信してみてください。")
+        st.warning("スプレッドシートにデータが見つかりません。")
