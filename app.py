@@ -72,32 +72,41 @@ elif mode == "1週間の集計を出す":
     df_raw = conn.read(ttl=0) 
     
     if df_raw is not None and not df_raw.empty:
-        # 2. 【最重要】名前ではなく「列の順番」でデータを強制的に抜き出す
-        # スプレッドシートの左から順に並んでいる前提で、新しいデータフレームを再構築します
-        # これにより、名前の重複や化けによるエラーを物理的に回避します
+        # 重複列を削除
+        df_raw = df_raw.loc[:, ~df_raw.columns.duplicated()].copy()
         
-        # 必要な列の番号（0=タイムスタンプ, 1=名前, 2=時給, 3=勤務時間, 4=個人売上, 5=歩合率）
-        # 列が足りない場合に備えて、存在する分だけ取得
-        num_actual_cols = len(df_raw.columns)
-        temp_df = pd.DataFrame()
+        # 2. 【ハイブリッド抽出】名前が一致するか、位置で特定するか
+        df = pd.DataFrame()
         
+        # ターゲットとなる列名（これらに変換したい）
         standard_names = ['タイムスタンプ', '名前', '時給', '勤務時間', '個人売上', '歩合率']
         
-        for i, name in enumerate(standard_names):
-            if i < num_actual_cols:
-                # df.iloc[:, i] で「i番目の列」を強制取得。これなら名前が重複していても1列しか取れません。
-                temp_df[name] = df_raw.iloc[:, i]
+        # スプレッドシート側の実際の列名リスト
+        actual_cols = list(df_raw.columns)
+        
+        for i, std_name in enumerate(standard_names):
+            # まずは名前が部分一致するか探す
+            found_col = None
+            for actual_col in actual_cols:
+                if std_name in str(actual_col):
+                    found_col = actual_col
+                    break
+            
+            if found_col:
+                # 名前で見つかった場合
+                df[std_name] = df_raw[found_col]
+            elif i < len(actual_cols):
+                # 名前で見つからない場合は、i番目の列を信じる
+                df[std_name] = df_raw.iloc[:, i]
             else:
-                temp_df[name] = 0
+                # どちらもダメなら0で埋める
+                df[std_name] = 0
 
-        df = temp_df.copy()
-
-        # 3. 型変換を「確実に1列ずつ」実行
+        # 3. 型変換（これがないと計算でコケます）
         df['タイムスタンプ'] = pd.to_datetime(df['タイムスタンプ'], errors='coerce')
         df = df.dropna(subset=['タイムスタンプ']).copy()
         
         for col in ['時給', '勤務時間', '個人売上', '歩合率']:
-            # Series（1列）であることを保証して数値化
             df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
 
         # 4. 週の計算
@@ -105,35 +114,34 @@ elif mode == "1週間の集計を出す":
         df['週'] = df['週'].dt.strftime('%Y-%m-%d (日)〜')
 
         week_list = sorted(df['週'].unique(), reverse=True)
-        selected_week = st.selectbox("集計する週を選択してください", week_list)
         
-        # 抽出（ここでも index をリセットして安全性を高める）
-        week_df = df[df['週'] == selected_week].copy().reset_index(drop=True)
+        if not week_list:
+            st.warning("集計可能な日付データが見つかりませんでした。")
+        else:
+            selected_week = st.selectbox("集計する週を選択してください", week_list)
+            week_df = df[df['週'] == selected_week].copy().reset_index(drop=True)
 
-        if not week_df.empty:
-            st.write(f"### {selected_week} の集計")
+            if not week_df.empty:
+                st.write(f"### {selected_week} の集計")
 
-            # 5. 計算（ラベル不一致を避けるため numpy 配列として計算）
-            week_df['時給計算'] = week_df['時給'].to_numpy() * week_df['勤務時間'].to_numpy()
-            week_df['歩合計算'] = week_df['個人売上'].to_numpy() * week_df['歩合率'].to_numpy()
-            
-            # 6. スタッフごとに集計
-            summary = week_df.groupby('名前').agg({
-                '勤務時間': 'sum', 
-                '個人売上': 'sum', 
-                '時給計算': 'sum', 
-                '歩合計算': 'sum'
-            }).reset_index()
+                # 5. 計算（numpy形式で安全に）
+                week_df['時給計算'] = week_df['時給'].to_numpy() * week_df['勤務時間'].to_numpy()
+                week_df['歩合計算'] = week_df['個人売上'].to_numpy() * week_df['歩合率'].to_numpy()
+                
+                # 6. 集計
+                summary = week_df.groupby('名前').agg({
+                    '勤務時間': 'sum', 
+                    '個人売上': 'sum', 
+                    '時給計算': 'sum', 
+                    '歩合計算': 'sum'
+                }).reset_index()
 
-            # 給料の決定（時給保障 vs 歩合）
-            summary['最終支給額'] = summary.apply(lambda x: max(x['時給計算'], x['歩合計算']), axis=1)
-            summary['計算方法'] = summary.apply(lambda x: "歩合" if x['歩合計算'] > x['時給計算'] else "時給保障", axis=1)
+                summary['最終支給額'] = summary.apply(lambda x: max(x['時給計算'], x['歩合計算']), axis=1)
+                summary['計算方法'] = summary.apply(lambda x: "歩合" if x['歩合計算'] > x['時給計算'] else "時給保障", axis=1)
 
-            # 表示
-            st.dataframe(summary[['名前', '勤務時間', '個人売上', '最終支給額', '計算方法']])
+                st.dataframe(summary[['名前', '勤務時間', '個人売上', '最終支給額', '計算方法']])
 
-            st.divider()
-            if not summary.empty:
+                st.divider()
                 target_staff = st.selectbox("詳細を確認するスタッフ", summary['名前'])
                 personal = summary[summary['名前'] == target_staff].iloc[0]
                 
@@ -142,7 +150,7 @@ elif mode == "1週間の集計を出す":
                 c1.metric("実働合計", f"{personal['勤務時間']}h")
                 c2.metric("売上合計", f"{int(personal['個人売上']):,}円")
                 c3.metric("確定給料", f"{int(personal['最終支給額']):,}円")
-        else:
-            st.info("この週にデータはありません。")
+            else:
+                st.info("この週にデータはありません。")
     else:
-        st.warning("スプレッドシートを読み込めません。")
+        st.warning("スプレッドシートからデータが読み込めません。スプレッドシート側に1行以上のデータ（ヘッダー以外）があるか確認してください。")
