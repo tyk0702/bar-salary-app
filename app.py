@@ -28,24 +28,25 @@ if mode == "日々の入力をする":
         
         submitted = st.form_submit_button("送信リンクを準備する")
         
-        if submitted:
+if submitted:
             if name == "":
                 st.error("名前を入力してください！")
             else:
-                # 送信先フォームURL
                 form_url = "https://docs.google.com/forms/d/e/1FAIpQLSc8Ost1yA_FAtXskdxt_8twu6vigBE3FEXBkH8Hw8rF8FRikw/formResponse"
                 
-                # 特定したIDをセット
+                # 日付を「年」「月」「日」に分解してパラメータを作成
                 params = {
                     "entry.474978113": name,
                     "entry.223259871": hourly_rate,
                     "entry.1496582745": hours,
                     "entry.640486226": sales,
                     "entry.1975425774": comm_rate,
-                    "entry.480614532": input_date.strftime("%Y-%m-%d") # ←判明した日付ID
+                    # 日付IDに _year, _month, _day を付けて送信
+                    "entry.480614532_year": input_date.year,
+                    "entry.480614532_month": input_date.month,
+                    "entry.480614532_day": input_date.day
                 }
                 
-                # 送信用URL生成
                 query_string = urllib.parse.urlencode(params)
                 complete_url = f"{form_url}?{query_string}&submit=Submit"
                 
