@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
+import urllib.parse
 
 # --- Googleスプレッドシートへの接続設定 ---
 conn = st.connection("google_sheets", type=GSheetsConnection)
@@ -13,13 +14,11 @@ mode = st.sidebar.radio("機能を選択", ["日々の入力をする", "1週間
 # ---------------------------------------------------------
 # モード1：日々の入力をする
 # ---------------------------------------------------------
-# ---------------------------------------------------------
-# モード1：日々の入力をする
-# ---------------------------------------------------------
 if mode == "日々の入力をする":
     st.title("📝 今日の出勤データを記入")
     
-    with st.form("input_form", clear_on_submit=True):
+    with st.form("input_form"):
+        # この日付がスプレッドシートのB列に反映されます
         input_date = st.date_input("日付", datetime.now())
         name = st.text_input("名前（スタッフ名）")
         hourly_rate = st.number_input("基本時給", value=1200)
@@ -27,70 +26,59 @@ if mode == "日々の入力をする":
         sales = st.number_input("今日の売上", value=0)
         comm_rate = st.number_input("歩合率", value=0.1)
         
-        submitted = st.form_submit_button("データを保存する")
+        submitted = st.form_submit_button("送信リンクを準備する")
         
         if submitted:
             if name == "":
                 st.error("名前を入力してください！")
             else:
-                try:
-                    # 1. 現在の全データを読み込む
-                    existing_data = conn.read(ttl=0)
-                    
-                    # 2. 新しい行をデータフレームとして作成
-                    new_row_df = pd.DataFrame([{
-                        "タイムスタンプ": datetime.now().strftime("%Y/%m/%d %H:%M:%S"),
-                        "日付": input_date.strftime("%Y/%m/%d"),
-                        "名前": name,
-                        "時給": hourly_rate,
-                        "勤務時間": hours,
-                        "売上": sales,
-                        "歩合率": comm_rate
-                    }])
-                    
-                    # 3. 既存のデータと新しい行を結合
-                    updated_df = pd.concat([existing_data, new_row_df], ignore_index=True)
-                    
-                    # 4. スプレッドシート全体を更新
-                    conn.update(data=updated_df)
-                    
-                    st.cache_data.clear()
-                    st.success(f"{name}さんのデータを保存しました！")
-                    st.balloons()
-                except Exception as e:
-                    st.error("保存に失敗しました。")
-                    with st.expander("詳細なエラー内容"):
-                        st.exception(e)
+                # 送信先フォームURL
+                form_url = "https://docs.google.com/forms/d/e/1FAIpQLSc8Ost1yA_FAtXskdxt_8twu6vigBE3FEXBkH8Hw8rF8FRikw/formResponse"
+                
+                # 特定したIDをセット
+                params = {
+                    "entry.474978113": name,
+                    "entry.223259871": hourly_rate,
+                    "entry.1496582745": hours,
+                    "entry.640486226": sales,
+                    "entry.1975425774": comm_rate,
+                    "entry.480614532": input_date.strftime("%Y-%m-%d") # ←判明した日付ID
+                }
+                
+                # 送信用URL生成
+                query_string = urllib.parse.urlencode(params)
+                complete_url = f"{form_url}?{query_string}&submit=Submit"
+                
+                st.success("✅ 送信データの準備完了！")
+                st.link_button("🚀 確定してスプレッドシートに保存", complete_url)
+
 # ---------------------------------------------------------
 # モード2：1週間の集計を出す
 # ---------------------------------------------------------
 elif mode == "1週間の集計を出す":
     st.title("📊 スタッフ別・週次集計")
     
+    # データを最新状態で読み込み
     df_raw = conn.read(ttl=0) 
     
     if df_raw is not None and not df_raw.empty:
-        # 重複削除
+        # 列の重複を排除
         df = df_raw.loc[:, ~df_raw.columns.duplicated()].copy()
-        
-        st.info(f"スプレッドシートから {len(df)} 行読み込みました。")
-
-        cols_count = len(df.columns)
         processed_rows = []
+        cols_count = len(df.columns)
 
         for i in range(len(df)):
             try:
-                # 0番目がタイムスタンプ、1番目が選択した日付
+                # 0番目がタイムスタンプ(A列)、1番目が入力した日付(B列)
                 raw_ts = str(df.iat[i, 0])
                 raw_date = str(df.iat[i, 1]) if cols_count > 1 else ""
                 
-                # B列（日付）を優先、なければA列（TS）
+                # B列の日付を優先、なければA列のタイムスタンプを使用
                 parsed_date = pd.to_datetime(raw_date, errors='coerce')
                 if pd.isna(parsed_date):
                     parsed_date = pd.to_datetime(raw_ts, errors='coerce')
                 
-                if pd.isna(parsed_date):
-                    continue
+                if pd.isna(parsed_date): continue
                     
                 processed_rows.append({
                     '確定日付': parsed_date,
@@ -105,14 +93,10 @@ elif mode == "1週間の集計を出す":
 
         final_df = pd.DataFrame(processed_rows)
 
-        if final_df.empty:
-            st.error("有効なデータが1件も見つかりませんでした。")
-        else:
-            # 週の計算（日曜始まり）
+        if not final_df.empty:
+            # 週の開始日（日曜日）を計算
             final_df['週開始'] = final_df['確定日付'].apply(lambda x: x - pd.Timedelta(days=(x.weekday() + 1) % 7))
             final_df['週ラベル'] = final_df['週開始'].dt.strftime('%Y-%m-%d (日)〜')
-
-            st.success(f"{len(final_df)} 件のデータを処理しました！")
 
             all_weeks = sorted(final_df['週ラベル'].unique(), reverse=True)
             selected_week = st.selectbox("集計する週を選択してください", all_weeks)
@@ -120,6 +104,7 @@ elif mode == "1週間の集計を出す":
             week_df = final_df[final_df['週ラベル'] == selected_week].copy()
 
             if not week_df.empty:
+                # 給与計算（時給 vs 歩合 の高い方）
                 week_df['時給計算'] = week_df['時給'].astype(float) * week_df['勤務時間'].astype(float)
                 week_df['歩合計算'] = week_df['個人売上'].astype(float) * week_df['歩合率'].astype(float)
                 
@@ -130,9 +115,12 @@ elif mode == "1週間の集計を出す":
                 summary['最終支給額'] = summary.apply(lambda x: max(x['時給計算'], x['歩合計算']), axis=1)
                 summary['計算方法'] = summary.apply(lambda x: "歩合" if x['歩合計算'] > x['時給計算'] else "時給保障", axis=1)
 
-                st.dataframe(summary)
+                # 結果表示
+                st.subheader(f"📅 {selected_week} の集計結果")
+                st.dataframe(summary[['名前', '勤務時間', '個人売上', '最終支給額', '計算方法']])
                 
                 st.divider()
+                # 個別詳細
                 target_staff = st.selectbox("詳細を確認するスタッフ", summary['名前'])
                 p = summary[summary['名前'] == target_staff].iloc[0]
                 c1, c2, c3 = st.columns(3)
