@@ -68,67 +68,52 @@ if mode == "日々の入力をする":
 elif mode == "1週間の集計を出す":
     st.title("📊 スタッフ別・週次集計")
     
-    # 1. データの読み込み
     df_raw = conn.read(ttl=0) 
     
     if df_raw is not None and not df_raw.empty:
         # 重複列を削除
-        df_raw = df_raw.loc[:, ~df_raw.columns.duplicated()].copy()
+        df = df_raw.loc[:, ~df_raw.columns.duplicated()].copy()
         
-        # 2. 【ハイブリッド抽出】名前が一致するか、位置で特定するか
-        df = pd.DataFrame()
+        # 【修正】スプレッドシートの実際の並びに合わせて列名を指定
+        # 1:タイムスタンプ, 2:日付(空), 3:名前, 4:時給, 5:勤務時間, 6:個人売上, 7:歩合率
+        actual_num_cols = len(df.columns)
+        standard_names = ['タイムスタンプ', '日付データ', '名前', '時給', '勤務時間', '個人売上', '歩合率']
         
-        # ターゲットとなる列名（これらに変換したい）
-        standard_names = ['タイムスタンプ', '名前', '時給', '勤務時間', '個人売上', '歩合率']
+        rename_dict = {}
+        for i in range(min(actual_num_cols, len(standard_names))):
+            rename_dict[df.columns[i]] = standard_names[i]
         
-        # スプレッドシート側の実際の列名リスト
-        actual_cols = list(df_raw.columns)
-        
-        for i, std_name in enumerate(standard_names):
-            # まずは名前が部分一致するか探す
-            found_col = None
-            for actual_col in actual_cols:
-                if std_name in str(actual_col):
-                    found_col = actual_col
-                    break
-            
-            if found_col:
-                # 名前で見つかった場合
-                df[std_name] = df_raw[found_col]
-            elif i < len(actual_cols):
-                # 名前で見つからない場合は、i番目の列を信じる
-                df[std_name] = df_raw.iloc[:, i]
-            else:
-                # どちらもダメなら0で埋める
-                df[std_name] = 0
+        df = df.rename(columns=rename_dict)
 
-        # 3. 型変換（これがないと計算でコケます）
-        df['タイムスタンプ'] = pd.to_datetime(df['タイムスタンプ'], errors='coerce')
-        df = df.dropna(subset=['タイムスタンプ']).copy()
+        # タイムスタンプを使って日付を確定させる（日付列が空なのをカバー）
+        df['確定日付'] = pd.to_datetime(df['タイムスタンプ'], errors='coerce')
+        df = df.dropna(subset=['確定日付']).copy()
         
+        # 数値変換（ズレが直るので正しく変換されます）
         for col in ['時給', '勤務時間', '個人売上', '歩合率']:
-            df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
 
-        # 4. 週の計算
-        df['週'] = df['タイムスタンプ'].apply(lambda x: x - pd.Timedelta(days=(x.weekday() + 1) % 7))
-        df['週'] = df['週'].dt.strftime('%Y-%m-%d (日)〜')
+        # 週の計算（日曜日始まり）
+        df['週'] = df['確定日付'].apply(lambda x: x - pd.Timedelta(days=(x.weekday() + 1) % 7))
+        df['週ラベル'] = df['週'].dt.strftime('%Y-%m-%d (日)〜')
 
-        week_list = sorted(df['週'].unique(), reverse=True)
+        week_list = sorted(df['週ラベル'].unique(), reverse=True)
         
         if not week_list:
-            st.warning("集計可能な日付データが見つかりませんでした。")
+            st.warning("集計できるデータがありません。")
         else:
             selected_week = st.selectbox("集計する週を選択してください", week_list)
-            week_df = df[df['週'] == selected_week].copy().reset_index(drop=True)
+            week_df = df[df['週ラベル'] == selected_week].copy().reset_index(drop=True)
 
             if not week_df.empty:
                 st.write(f"### {selected_week} の集計")
 
-                # 5. 計算（numpy形式で安全に）
-                week_df['時給計算'] = week_df['時給'].to_numpy() * week_df['勤務時間'].to_numpy()
-                week_df['歩合計算'] = week_df['個人売上'].to_numpy() * week_df['歩合率'].to_numpy()
+                # 計算
+                week_df['時給計算'] = week_df['時給'] * week_df['勤務時間']
+                week_df['歩合計算'] = week_df['個人売上'] * week_df['歩合率']
                 
-                # 6. 集計
+                # 集計
                 summary = week_df.groupby('名前').agg({
                     '勤務時間': 'sum', 
                     '個人売上': 'sum', 
@@ -151,6 +136,6 @@ elif mode == "1週間の集計を出す":
                 c2.metric("売上合計", f"{int(personal['個人売上']):,}円")
                 c3.metric("確定給料", f"{int(personal['最終支給額']):,}円")
             else:
-                st.info("この週にデータはありません。")
+                st.info("データがありません。")
     else:
-        st.warning("スプレッドシートからデータが読み込めません。スプレッドシート側に1行以上のデータ（ヘッダー以外）があるか確認してください。")
+        st.warning("スプレッドシートを読み込めません。")
