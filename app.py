@@ -34,13 +34,13 @@ if mode == "日々の入力をする":
                 form_url = "https://docs.google.com/forms/d/e/1FAIpQLSc8Ost1yA_FAtXskdxt_8twu6vigBE3FEXBkH8Hw8rF8FRikw/formResponse"
                 
                 # 記述式にしたので ID ひとつに YYYY-MM-DD を流し込む
-                params = {
-                    "entry.474978113": str(name),
-                    "entry.223259871": str(hourly_rate),
-                    "entry.1496582745": str(hours),
-                    "entry.640486226": str(sales),
-                    "entry.1975425774": str(comm_rate),
-                    "entry.480614532": input_date.strftime("%Y-%m-%d") 
+params = {
+                    "entry.474978113": name,
+                    "entry.223259871": hourly_rate,
+                    "entry.1496582745": hours,
+                    "entry.640486226": sales,
+                    "entry.1975425774": comm_rate,
+                    "entry.2102143015": input_date.strftime("%Y-%m-%d") # ←ここを最新IDに修正
                 }
                 
                 query_string = urllib.parse.urlencode(params)
