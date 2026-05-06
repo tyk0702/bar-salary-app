@@ -72,50 +72,51 @@ elif mode == "1週間の集計を出す":
     df_raw = conn.read(ttl=0) 
     
     if df_raw is not None and not df_raw.empty:
-        # 2. 【最重要】重複した列名を物理的に削除する（1つ目だけ残す）
-        # これにより df['時給'] が必ず1列になるようにします
+        # 2. 列の重複を物理的に排除し、コピーを作成
         df = df_raw.loc[:, ~df_raw.columns.duplicated()].copy()
 
-        # 3. 列名の整理（Googleフォームの長い名前を短い名前に置換）
+        # 3. 列名の強制割り当て（Googleフォームの長い名前対策）
+        # スプレッドシートの左から順に：タイムスタンプ, 名前, 時給, 勤務時間, 個人売上, 歩合率 と想定
         standard_cols = ['タイムスタンプ', '名前', '時給', '勤務時間', '個人売上', '歩合率']
-        actual_cols = list(df.columns)
-        rename_dict = {actual_cols[i]: standard_cols[i] for i in range(min(len(actual_cols), len(standard_cols)))}
-        df = df.rename(columns=rename_dict)
+        rename_map = {df.columns[i]: standard_cols[i] for i in range(min(len(df.columns), len(standard_cols)))}
+        df = df.rename(columns=rename_map)
 
-        # 4. 日付変換
+        # 4. 型変換を確実に行う
         df['タイムスタンプ'] = pd.to_datetime(df['タイムスタンプ'], errors='coerce')
-        df = df.dropna(subset=['タイムスタンプ']) 
+        df = df.dropna(subset=['タイムスタンプ']).copy()
         
-        # 5. 【修正】数値変換を「絶対に1列ずつ」行う
-        num_cols = ['時給', '勤務時間', '個人売上', '歩合率']
-        for col in num_cols:
+        for col in ['時給', '勤務時間', '個人売上', '歩合率']:
             if col in df.columns:
-                # .iloc[:, 0] を使うことで、万が一重複していても最初の1列だけを強制指定
-                target_col = df[col]
-                if isinstance(target_col, pd.DataFrame):
-                    target_col = target_col.iloc[:, 0]
-                df[col] = pd.to_numeric(target_col, errors='coerce').fillna(0)
+                # 確実に1列ずつ抽出し、数値化
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             else:
                 df[col] = 0
 
-        # 6. 週の計算
+        # 5. 週の計算
         df['週'] = df['タイムスタンプ'].apply(lambda x: x - pd.Timedelta(days=(x.weekday() + 1) % 7))
         df['週'] = df['週'].dt.strftime('%Y-%m-%d (日)〜')
 
         week_list = sorted(df['週'].unique(), reverse=True)
         selected_week = st.selectbox("集計する週を選択してください", week_list)
         
-        # 抽出と計算
-        week_df = df[df['週'] == selected_week].copy()
+        # 抽出（インデックスをリセットして重複ラベル問題を物理的に解消）
+        week_df = df[df['週'] == selected_week].copy().reset_index(drop=True)
 
         if not week_df.empty:
             st.write(f"### {selected_week} の集計")
 
-            # 計算（Series同士の計算に限定）
-            week_df['時給計算'] = week_df['時給'] * week_df['勤務時間']
-            week_df['歩合計算'] = week_df['個人売上'] * week_df['歩合率']
+            # 6. 【最重要修正】計算ミスを防ぐため、numpy形式で計算
+            # Pandasのラベル（列名）の紐付け機能をあえて使わず、純粋な数値の掛け算を行います
+            try:
+                week_df['時給計算'] = week_df['時給'].to_numpy() * week_df['勤務時間'].to_numpy()
+                week_df['歩合計算'] = week_df['個人売上'].to_numpy() * week_df['歩合率'].to_numpy()
+            except Exception as e:
+                # 万が一計算できない場合の予備策
+                st.error("計算中にエラーが発生しました。データの形式を確認してください。")
+                week_df['時給計算'] = 0
+                week_df['歩合計算'] = 0
             
-            # 集計
+            # 7. 集計
             summary = week_df.groupby('名前').agg({
                 '勤務時間': 'sum', 
                 '個人売上': 'sum', 
@@ -123,7 +124,7 @@ elif mode == "1週間の集計を出す":
                 '歩合計算': 'sum'
             }).reset_index()
 
-            # 最終給与決定
+            # 給与決定
             summary['最終支給額'] = summary.apply(lambda x: max(x['時給計算'], x['歩合計算']), axis=1)
             summary['計算方法'] = summary.apply(lambda x: "歩合" if x['歩合計算'] > x['時給計算'] else "時給保障", axis=1)
 
@@ -140,6 +141,6 @@ elif mode == "1週間の集計を出す":
                 c2.metric("売上合計", f"{int(personal['個人売上']):,}円")
                 c3.metric("確定給料", f"{int(personal['最終支給額']):,}円")
         else:
-            st.info("この週にデータはありません。")
+            st.info("データがありません。")
     else:
-        st.warning("データが読み込めません。")
+        st.warning("スプレッドシートを読み込めません。")
