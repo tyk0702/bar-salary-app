@@ -35,12 +35,12 @@ if mode == "日々の入力をする":
                 
                 # 最新の「記述式」用ID
                 params = {
-                    "entry.474978113": name,
-                    "entry.223259871": hourly_rate,
-                    "entry.1496582745": hours,
-                    "entry.640486226": sales,
-                    "entry.1975425774": comm_rate,
-                    "entry.2102143015": input_date.strftime("%Y-%m-%d")
+                    "entry.1983050011": name,           # 名前
+                    "entry.137452632": hourly_rate,     # 基本時給
+                    "entry.347515091": hours,           # 勤務時間
+                    "entry.1030999587": sales,          # 売上
+                    "entry.2095030248": comm_rate,      # 歩合率
+                    "entry.1200084478": input_date.strftime("%Y-%m-%d") # 日付(記述式)
                 }
                 
                 # ↓ここの行の先頭の空白を、上のparamsの開始位置と揃えるのがコツです
