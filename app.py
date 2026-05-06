@@ -1,17 +1,13 @@
 import streamlit as st
 import pandas as pd
-import os
 from datetime import datetime
+from streamlit_gsheets import GSheetsConnection
+import requests  # ← フォーム送信に必要
 
-# 共通設定：データの保存先
-DATA_FILE = 'bar_history.csv'
+# --- Googleスプレッドシートへの接続設定（読み込み用） ---
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-# ファイルがなければ作成
-if not os.path.exists(DATA_FILE):
-    df_init = pd.DataFrame(columns=['日付', '名前', '時給', '勤務時間', '個人売上', '歩合率'])
-    df_init.to_csv(DATA_FILE, index=False, encoding='utf-8-sig')
-
-# --- サイドバーで機能を切り替え ---
+# --- サイドバー ---
 st.sidebar.title("メニュー")
 mode = st.sidebar.radio("機能を選択", ["日々の入力をする", "1週間の集計を出す"])
 
@@ -35,10 +31,31 @@ if mode == "日々の入力をする":
             if name == "":
                 st.error("名前を入力してください！")
             else:
-                new_row = pd.DataFrame([[date, name, hourly_rate, hours, sales, comm_rate]], 
-                                       columns=['日付', '名前', '時給', '勤務時間', '個人売上', '歩合率'])
-                new_row.to_csv(DATA_FILE, mode='a', header=False, index=False, encoding='utf-8-sig')
-                st.success(f"{name}さんのデータを記録しました！")
+                # --- フォーム送信による書き込み処理 ---
+                # あなたが取得したURLをもとに設定
+                form_url = "https://docs.google.com/forms/d/e/1FAIpQLSc8Ost1yA_FAtXskdxt_8twu6vigBE3FEXBkH8Hw8rF8FRikw/formResponse"
+                
+                params = {
+                    "entry.474978113": name,           # 名前
+                    "entry.223259871": hourly_rate,    # 時給
+                    "entry.1496582745": hours,          # 勤務時間
+                    "entry.640486226": sales,          # 個人売上
+                    "entry.1975425774": comm_rate,     # 歩合率
+                    # 日付はフォーム側に項目がない場合はスプレッドシート側の「タイムスタンプ」で代用するか、
+                    # フォームに日付項目を追加してIDを紐付けてください
+                }
+                
+                try:
+                    response = requests.post(form_url, data=params)
+                    if response.status_code == 200:
+                        st.success(f"{name}さんのデータを送信しました！")
+                        st.balloons()
+                        # キャッシュをクリアして最新データが読み込まれるようにする
+                        st.cache_data.clear()
+                    else:
+                        st.error("送信に失敗しました。")
+                except Exception as e:
+                    st.error(f"エラーが発生しました: {e}")
 
 # ---------------------------------------------------------
 # モード2：1週間の集計を出す
@@ -46,61 +63,54 @@ if mode == "日々の入力をする":
 elif mode == "1週間の集計を出す":
     st.title("📊 スタッフ別・週次集計")
     
-    if os.path.exists(DATA_FILE):
-        df = pd.read_csv(DATA_FILE)
-        # 日付データをPythonが理解できる「日付型」に変換
-        df['日付'] = pd.to_datetime(df['日付'])
+    # スプレッドシートから読み込む（ttl=0で常に最新を取得）
+    df = conn.read(ttl=0) 
+    
+    if not df.empty:
+        # スプレッドシートの「タイムスタンプ」列を「日付」として使う設定
+        # もしスプレッドシートに「日付」という列が別にあるなら、適宜書き換えてください
+        date_column = 'タイムスタンプ' if 'タイムスタンプ' in df.columns else '日付'
         
-        if not df.empty:
-            # --- 週（日〜土）のラベルを作る ---
-            # 日曜日を週の始まり(0)として、その週の「日曜日」の日付を計算
-            df['週'] = df['日付'].apply(lambda x: x - pd.Timedelta(days=(x.weekday() + 1) % 7))
-            df['週'] = df['週'].dt.strftime('%Y-%m-%d (日)〜')
+        df[date_column] = pd.to_datetime(df[date_column])
+        
+        # 週の開始日（日曜日）を計算
+        df['週'] = df[date_column].apply(lambda x: x - pd.Timedelta(days=(x.weekday() + 1) % 7))
+        df['週'] = df['週'].dt.strftime('%Y-%m-%d (日)〜')
 
-            # --- 画面で「週」を選択 ---
-            week_list = sorted(df['週'].unique(), reverse=True)
-            selected_week = st.selectbox("集計する週を選択してください", week_list)
+        week_list = sorted(df['週'].unique(), reverse=True)
+        selected_week = st.selectbox("集計する週を選択してください", week_list)
+        week_df = df[df['週'] == selected_week].copy()
+
+        st.write(f"### {selected_week} の集計")
+
+        # 列名がフォーム送信で日本語になっている場合を想定
+        # df.columnsを確認して、必要に応じて修正してください
+        col_name = '名前' if '名前' in df.columns else 'entry.474978113' # 以下同様
+        
+        # 集計計算
+        week_df['時給計算'] = week_df['時給'] * week_df['勤務時間']
+        week_df['歩合計算'] = week_df['個人売上'] * week_df['歩合率']
+        
+        staff_summary = week_df.groupby('名前').agg({
+            '勤務時間': 'sum', '個人売上': 'sum', '時給計算': 'sum', '歩合計算': 'sum'
+        }).reset_index()
+
+        staff_summary['最終支給額'] = staff_summary.apply(lambda x: max(x['時給計算'], x['歩合計算']), axis=1)
+        staff_summary['計算方法'] = staff_summary.apply(lambda x: "歩合" if x['歩合計算'] > x['時給計算'] else "時給保障", axis=1)
+
+        st.dataframe(staff_summary[['名前', '勤務時間', '個人売上', '最終支給額', '計算方法']])
+
+        st.divider()
+        target_staff = st.selectbox("詳細を確認するスタッフ", staff_summary['名前'])
+        personal_data = staff_summary[staff_summary['名前'] == target_staff].iloc[0]
             
-            # 選択された週のデータだけに絞り込む
-            week_df = df[df['週'] == selected_week].copy()
-
-            st.write(f"### {selected_week} の集計")
-
-            # --- スタッフごとにグループ化して計算 ---
-            week_df['時給計算'] = week_df['時給'] * week_df['勤務時間']
-            week_df['歩合計算'] = week_df['個人売上'] * week_df['歩合率']
+        st.write(f"#### {target_staff} さんの詳細")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("実働合計", f"{personal_data['勤務時間']}h")
+        c2.metric("売上合計", f"{personal_data['個人売上']:,}円")
+        c3.metric("確定給料", f"{personal_data['最終支給額']:,}円")
             
-            # スタッフごとに集計（groupby）
-            staff_summary = week_df.groupby('名前').agg({
-                '勤務時間': 'sum',
-                '個人売上': 'sum',
-                '時給計算': 'sum',
-                '歩合計算': 'sum'
-            }).reset_index()
+        st.write(f"※ 時給合計({personal_data['時給計算']:,}円) と 歩合合計({personal_data['歩合計算']:,}円) を比較して高い方を採用しています。")
 
-            # 最終的な支給額を判定（週の合計で比較）
-            staff_summary['最終支給額'] = staff_summary.apply(
-                lambda x: max(x['時給計算'], x['歩合計算']), axis=1
-            )
-            staff_summary['計算方法'] = staff_summary.apply(
-                lambda x: "歩合" if x['歩合計算'] > x['時給計算'] else "時給保障", axis=1
-            )
-
-            # 結果を表示
-            st.dataframe(staff_summary[['名前', '勤務時間', '個人売上', '最終支給額', '計算方法']])
-
-            # スタッフを個別に詳しく見る
-            st.divider()
-            target_staff = st.selectbox("詳細を確認するスタッフ", staff_summary['名前'])
-            personal_data = staff_summary[staff_summary['名前'] == target_staff].iloc[0]
-            
-            st.write(f"#### {target_staff} さんの詳細")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("実働合計", f"{personal_data['勤務時間']}h")
-            c2.metric("売上合計", f"{personal_data['個人売上']:,}円")
-            c3.metric("確定給料", f"{personal_data['最終支給額']:,}円")
-            
-            st.write(f"※ 時給合計({personal_data['時給計算']:,}円) と 歩合合計({personal_data['歩合計算']:,}円) を比較して高い方を採用しています。")
-
-        else:
-            st.warning("まだデータがありません。")
+    else:
+        st.warning("まだデータがありません。")
