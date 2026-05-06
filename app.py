@@ -68,63 +68,54 @@ if mode == "日々の入力をする":
 elif mode == "1週間の集計を出す":
     st.title("📊 スタッフ別・週次集計")
     
-    # データの読み込み
-    df = conn.read(ttl=0) 
+    # 1. データの読み込み
+    df_raw = conn.read(ttl=0) 
     
-    if df is not None and not df.empty:
-        # --- 重複列名の解消 ---
-        # 全く同じ名前の列がある場合、強制的にユニークな名前に変更する
-        df = df.loc[:, ~df.columns.duplicated()].copy()
+    if df_raw is not None and not df_raw.empty:
+        # 2. 【最重要】重複した列名を物理的に削除する（1つ目だけ残す）
+        # これにより df['時給'] が必ず1列になるようにします
+        df = df_raw.loc[:, ~df_raw.columns.duplicated()].copy()
 
-        # --- 列名の整理 ---
+        # 3. 列名の整理（Googleフォームの長い名前を短い名前に置換）
         standard_cols = ['タイムスタンプ', '名前', '時給', '勤務時間', '個人売上', '歩合率']
         actual_cols = list(df.columns)
-        
-        # 存在する列の数だけ名前を付け直す
-        new_columns = {}
-        for i in range(min(len(actual_cols), len(standard_cols))):
-            new_columns[actual_cols[i]] = standard_cols[i]
-        
-        df = df.rename(columns=new_columns)
+        rename_dict = {actual_cols[i]: standard_cols[i] for i in range(min(len(actual_cols), len(standard_cols)))}
+        df = df.rename(columns=rename_dict)
 
-        # --- 型の変換とクリーニング ---
-        # 日付変換
+        # 4. 日付変換
         df['タイムスタンプ'] = pd.to_datetime(df['タイムスタンプ'], errors='coerce')
         df = df.dropna(subset=['タイムスタンプ']) 
         
-        # 数値変換（1つずつ確実に変換）
+        # 5. 【修正】数値変換を「絶対に1列ずつ」行う
         num_cols = ['時給', '勤務時間', '個人売上', '歩合率']
         for col in num_cols:
             if col in df.columns:
-                # 重複エラーを避けるため、Seriesとして取得して変換
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                # .iloc[:, 0] を使うことで、万が一重複していても最初の1列だけを強制指定
+                target_col = df[col]
+                if isinstance(target_col, pd.DataFrame):
+                    target_col = target_col.iloc[:, 0]
+                df[col] = pd.to_numeric(target_col, errors='coerce').fillna(0)
             else:
                 df[col] = 0
 
-        # --- 週の計算 ---
+        # 6. 週の計算
         df['週'] = df['タイムスタンプ'].apply(lambda x: x - pd.Timedelta(days=(x.weekday() + 1) % 7))
         df['週'] = df['週'].dt.strftime('%Y-%m-%d (日)〜')
 
         week_list = sorted(df['週'].unique(), reverse=True)
         selected_week = st.selectbox("集計する週を選択してください", week_list)
         
-        # 選択された週のデータを抽出
+        # 抽出と計算
         week_df = df[df['週'] == selected_week].copy()
 
         if not week_df.empty:
             st.write(f"### {selected_week} の集計")
 
-            # --- 計算処理 ---
-            # シリーズ同士の計算にすることで reindex エラーを回避
-            sales_ser = week_df['個人売上'].reset_index(drop=True)
-            rate_ser = week_df['歩合率'].reset_index(drop=True)
-            hour_ser = week_df['時給'].reset_index(drop=True)
-            work_hour_ser = week_df['勤務時間'].reset_index(drop=True)
-
-            week_df['時給計算'] = (hour_ser * work_hour_ser).values
-            week_df['歩合計算'] = (sales_ser * rate_ser).values
+            # 計算（Series同士の計算に限定）
+            week_df['時給計算'] = week_df['時給'] * week_df['勤務時間']
+            week_df['歩合計算'] = week_df['個人売上'] * week_df['歩合率']
             
-            # スタッフごとに合計
+            # 集計
             summary = week_df.groupby('名前').agg({
                 '勤務時間': 'sum', 
                 '個人売上': 'sum', 
@@ -132,7 +123,7 @@ elif mode == "1週間の集計を出す":
                 '歩合計算': 'sum'
             }).reset_index()
 
-            # 給料の決定
+            # 最終給与決定
             summary['最終支給額'] = summary.apply(lambda x: max(x['時給計算'], x['歩合計算']), axis=1)
             summary['計算方法'] = summary.apply(lambda x: "歩合" if x['歩合計算'] > x['時給計算'] else "時給保障", axis=1)
 
@@ -142,13 +133,13 @@ elif mode == "1週間の集計を出す":
             if not summary.empty:
                 target_staff = st.selectbox("詳細を確認するスタッフ", summary['名前'])
                 personal = summary[summary['名前'] == target_staff].iloc[0]
-                    
+                
                 st.write(f"#### {target_staff} さんの詳細")
                 c1, c2, c3 = st.columns(3)
                 c1.metric("実働合計", f"{personal['勤務時間']}h")
                 c2.metric("売上合計", f"{int(personal['個人売上']):,}円")
                 c3.metric("確定給料", f"{int(personal['最終支給額']):,}円")
         else:
-            st.info("選択された週にデータはありません。")
+            st.info("この週にデータはありません。")
     else:
-        st.warning("スプレッドシートにデータが見つかりません。")
+        st.warning("データが読み込めません。")
