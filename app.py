@@ -31,26 +31,24 @@ if mode == "日々の入力をする":
             if not name:
                 st.error("名前を入力してください")
             else:
-                # 【重要】現在のフォームの送信先URL
                 form_url = "https://docs.google.com/forms/d/e/1FAIpQLSc8Ost1yA_FAtXskdxt_8twu6vigBE3FEXBkH8Hw8rF8FRikw/formResponse"
                 
-                # 【確定】最新の全項目ID
+                # すべての値を str() で囲い、フォーム側の受け入れ態勢を確実にします
                 params = {
-                    "entry.1983050011": name,           # 名前
-                    "entry.137452632": hourly_rate,     # 基本時給
-                    "entry.347515091": hours,           # 勤務時間
-                    "entry.1030999587": sales,          # 売上
-                    "entry.2095030248": comm_rate,      # 歩合率
-                    "entry.1200084478": input_date.strftime("%Y-%m-%d") # 日付
+                    "entry.1983050011": str(name),
+                    "entry.137452632": str(hourly_rate),
+                    "entry.347515091": str(hours),
+                    "entry.1030999587": str(sales),
+                    "entry.2095030248": str(comm_rate),
+                    "entry.1200084478": input_date.strftime("%Y-%m-%d")
                 }
                 
-                # URLを生成
                 query_string = urllib.parse.urlencode(params)
                 complete_url = f"{form_url}?{query_string}&submit=Submit"
                 
-                st.success("準備ができました。下のボタンを押して完了させてください！")
+                st.success("✅ 送信準備が整いました")
                 st.link_button("🚀 スプレッドシートに保存", complete_url)
-
+                
 # ---------------------------------------------------------
 # モード2：1週間の集計を出す
 # ---------------------------------------------------------
