@@ -74,34 +74,34 @@ elif mode == "1週間の集計を出す":
         # 重複列を削除
         df = df_raw.loc[:, ~df_raw.columns.duplicated()].copy()
         
-        # 【修正】スプレッドシートの実際の並びに合わせて列名を指定
-        # 1:タイムスタンプ, 2:日付(空), 3:名前, 4:時給, 5:勤務時間, 6:個人売上, 7:歩合率
-        actual_num_cols = len(df.columns)
-        standard_names = ['タイムスタンプ', '日付データ', '名前', '時給', '勤務時間', '個人売上', '歩合率']
-        
-        rename_dict = {}
-        for i in range(min(actual_num_cols, len(standard_names))):
-            rename_dict[df.columns[i]] = standard_names[i]
-        
-        df = df.rename(columns=rename_dict)
+        # 【重要】列名を強制指定（2列目の「日付」を計算の主役にします）
+        standard_names = ['タイムスタンプ', '選択日付', '名前', '時給', '勤務時間', '個人売上', '歩合率']
+        rename_map = {df.columns[i]: standard_names[i] for i in range(min(len(df.columns), len(standard_names)))}
+        df = df.rename(columns=rename_map)
 
-        # タイムスタンプを使って日付を確定させる（日付列が空なのをカバー）
-        df['確定日付'] = pd.to_datetime(df['タイムスタンプ'], errors='coerce')
+        # 1. ユーザーが選んだ「選択日付」を日付形式に変換
+        # もし空なら「タイムスタンプ」で補完する
+        df['確定日付'] = pd.to_datetime(df['選択日付'], errors='coerce')
+        df['確定日付'] = df['確定日付'].fillna(pd.to_datetime(df['タイムスタンプ'], errors='coerce'))
+        
+        # 2. 日付が取れなかった行を除外
         df = df.dropna(subset=['確定日付']).copy()
         
-        # 数値変換（ズレが直るので正しく変換されます）
+        # 3. 数値変換
         for col in ['時給', '勤務時間', '個人売上', '歩合率']:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
 
-        # 週の計算（日曜日始まり）
-        df['週'] = df['確定日付'].apply(lambda x: x - pd.Timedelta(days=(x.weekday() + 1) % 7))
-        df['週ラベル'] = df['週'].dt.strftime('%Y-%m-%d (日)〜')
+        # 4. 【週の計算ロジック】日曜から土曜を一つの塊にする
+        # 日曜始まり：(x.weekday() + 1) % 7 を引くことで、その週の日曜日の日付を算出
+        df['週開始日'] = df['確定日付'].apply(lambda x: x - pd.Timedelta(days=(x.weekday() + 1) % 7))
+        df['週ラベル'] = df['週開始日'].dt.strftime('%Y-%m-%d (日)〜')
 
+        # プルダウンの作成
         week_list = sorted(df['週ラベル'].unique(), reverse=True)
         
         if not week_list:
-            st.warning("集計できるデータがありません。")
+            st.warning("集計可能な日付データが見つかりません。")
         else:
             selected_week = st.selectbox("集計する週を選択してください", week_list)
             week_df = df[df['週ラベル'] == selected_week].copy().reset_index(drop=True)
@@ -109,11 +109,11 @@ elif mode == "1週間の集計を出す":
             if not week_df.empty:
                 st.write(f"### {selected_week} の集計")
 
-                # 計算
-                week_df['時給計算'] = week_df['時給'] * week_df['勤務時間']
-                week_df['歩合計算'] = week_df['個人売上'] * week_df['歩合率']
+                # 5. 計算（numpy形式で安全に）
+                week_df['時給計算'] = week_df['時給'].to_numpy() * week_df['勤務時間'].to_numpy()
+                week_df['歩合計算'] = week_df['個人売上'].to_numpy() * week_df['歩合率'].to_numpy()
                 
-                # 集計
+                # 6. スタッフごとに集計
                 summary = week_df.groupby('名前').agg({
                     '勤務時間': 'sum', 
                     '個人売上': 'sum', 
@@ -127,14 +127,15 @@ elif mode == "1週間の集計を出す":
                 st.dataframe(summary[['名前', '勤務時間', '個人売上', '最終支給額', '計算方法']])
 
                 st.divider()
-                target_staff = st.selectbox("詳細を確認するスタッフ", summary['名前'])
-                personal = summary[summary['名前'] == target_staff].iloc[0]
-                
-                st.write(f"#### {target_staff} さんの詳細")
-                c1, c2, c3 = st.columns(3)
-                c1.metric("実働合計", f"{personal['勤務時間']}h")
-                c2.metric("売上合計", f"{int(personal['個人売上']):,}円")
-                c3.metric("確定給料", f"{int(personal['最終支給額']):,}円")
+                if not summary.empty:
+                    target_staff = st.selectbox("詳細を確認するスタッフ", summary['名前'])
+                    personal = summary[summary['名前'] == target_staff].iloc[0]
+                    
+                    st.write(f"#### {target_staff} さんの詳細")
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("実働合計", f"{personal['勤務時間']}h")
+                    c2.metric("売上合計", f"{int(personal['個人売上']):,}円")
+                    c3.metric("確定給料", f"{int(personal['最終支給額']):,}円")
             else:
                 st.info("データがありません。")
     else:
