@@ -4,44 +4,53 @@ from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
 import urllib.parse
 
-# --- 接続設定 ---
+# --- Googleスプレッドシートへの接続設定 ---
 conn = st.connection("google_sheets", type=GSheetsConnection)
 
-st.title("📝 勤務データ入力 (最新版)")
+# --- サイドバー (ここが抜けていたためエラーになっていました) ---
+st.sidebar.title("メニュー")
+mode = st.sidebar.radio("機能を選択", ["日々の入力をする", "1週間の集計を出す"])
 
-with st.form("input_form"):
-    input_date = st.date_input("日付", datetime.now())
-    name = st.text_input("名前")
-    hourly_rate = st.number_input("基本時給", value=1200)
-    hours = st.number_input("勤務時間", value=0.0, step=0.5)
-    sales = st.number_input("売上", value=0)
-    comm_rate = st.number_input("歩合率", value=0.1)
-    
-    submitted = st.form_submit_button("データを送信する")
-    
-    if submitted:
-        if not name:
-            st.error("名前を入力してください")
-        else:
-            # 【重要】現在のフォームの送信先URL
-            form_url = "https://docs.google.com/forms/d/e/1FAIpQLSc8Ost1yA_FAtXskdxt_8twu6vigBE3FEXBkH8Hw8rF8FRikw/formResponse"
-            
-            # 【確定】最新の全項目ID
-            params = {
-                "entry.1983050011": name,           # 名前
-                "entry.137452632": hourly_rate,     # 基本時給
-                "entry.347515091": hours,           # 勤務時間
-                "entry.1030999587": sales,          # 売上
-                "entry.2095030248": comm_rate,      # 歩合率
-                "entry.1200084478": input_date.strftime("%Y-%m-%d") # 日付
-            }
-            
-            # URLを生成
-            query_string = urllib.parse.urlencode(params)
-            complete_url = f"{form_url}?{query_string}&submit=Submit"
-            
-            st.success("準備ができました。下のボタンを押して完了させてください！")
-            st.link_button("🚀 スプレッドシートに保存", complete_url)
+# ---------------------------------------------------------
+# モード1：日々の入力をする
+# ---------------------------------------------------------
+if mode == "日々の入力をする":
+    st.title("📝 勤務データ入力 (最新版)")
+
+    with st.form("input_form"):
+        input_date = st.date_input("日付", datetime.now())
+        name = st.text_input("名前")
+        hourly_rate = st.number_input("基本時給", value=1200)
+        hours = st.number_input("勤務時間", value=0.0, step=0.5)
+        sales = st.number_input("売上", value=0)
+        comm_rate = st.number_input("歩合率", value=0.1)
+        
+        submitted = st.form_submit_button("データを送信する")
+        
+        if submitted:
+            if not name:
+                st.error("名前を入力してください")
+            else:
+                # 【重要】現在のフォームの送信先URL
+                form_url = "https://docs.google.com/forms/d/e/1FAIpQLSc8Ost1yA_FAtXskdxt_8twu6vigBE3FEXBkH8Hw8rF8FRikw/formResponse"
+                
+                # 【確定】最新の全項目ID
+                params = {
+                    "entry.1983050011": name,           # 名前
+                    "entry.137452632": hourly_rate,     # 基本時給
+                    "entry.347515091": hours,           # 勤務時間
+                    "entry.1030999587": sales,          # 売上
+                    "entry.2095030248": comm_rate,      # 歩合率
+                    "entry.1200084478": input_date.strftime("%Y-%m-%d") # 日付
+                }
+                
+                # URLを生成
+                query_string = urllib.parse.urlencode(params)
+                complete_url = f"{form_url}?{query_string}&submit=Submit"
+                
+                st.success("準備ができました。下のボタンを押して完了させてください！")
+                st.link_button("🚀 スプレッドシートに保存", complete_url)
+
 # ---------------------------------------------------------
 # モード2：1週間の集計を出す
 # ---------------------------------------------------------
@@ -117,3 +126,5 @@ elif mode == "1週間の集計を出す":
                 c1.metric("実働合計", f"{p['勤務時間']}h")
                 c2.metric("売上合計", f"{int(p['個人売上']):,}円")
                 c3.metric("確定給料", f"{int(p['最終支給額']):,}円")
+    else:
+        st.info("データが読み込めませんでした。スプレッドシートを確認してください。")
