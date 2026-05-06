@@ -27,7 +27,7 @@ if mode == "日々の入力をする":
         submitted = st.form_submit_button("送信リンクを準備する")
         
         # ここから下が「送信ボタン」が押された後の処理
-       if submitted:
+    if submitted:
             if name == "":
                 st.error("名前を入力してください！")
             else:
