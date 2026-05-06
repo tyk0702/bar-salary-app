@@ -37,11 +37,11 @@ if mode == "日々の入力をする":
                 # 新しいフォームから抜き出した最新ID
                 params = {
                     "entry.2065842886": input_date.strftime("%Y-%m-%d"), # 日付
-                    "entry.1030999587": str(name),                       # 名前
+                    "entry.1983050011": str(name),                       # 名前 (★ここが変わっていました)
                     "entry.137452632": str(hourly_rate),                 # 基本時給
                     "entry.347515091": str(hours),                       # 勤務時間
-                    "entry.1983050011": str(sales),                      # 売上
-                    "entry.1200084478": str(comm_rate)                   # 歩合率
+                    "entry.1200084478": str(sales),                      # 売上 (★ここが変わっていました)
+                    "entry.1030999587": str(comm_rate)                   # 歩合率 (★ここが変わっていました)
                 }
                 
                 query_string = urllib.parse.urlencode(params)
