@@ -35,13 +35,14 @@ if mode == "日々の入力をする":
                 form_url = "https://docs.google.com/forms/d/e/1FAIpQLScNydbSJ03cCZd4_rs56zaq-CDSqRa5wVp5d_D1nqZTkYZ7Cg/formResponse"
                 
                 # 新しいフォームから抜き出した最新ID
+                # --- 【最新】売上（回答）.xlsx の列順に100%合わせたID ---
                 params = {
                     "entry.2065842886": input_date.strftime("%Y-%m-%d"), # 日付 (B列)
                     "entry.1983050011": str(name),                       # 名前 (C列)
                     "entry.137452632": str(hourly_rate),                 # 時給 (D列)
                     "entry.347515091": str(hours),                       # 勤務時間 (E列)
-                    "entry.1200084478": str(sales),                      # 個人売上 (F列)
-                    "entry.1030999587": str(comm_rate)                   # 歩合率 (G列)
+                    "entry.1975425774": str(sales),                      # 個人売上 (F列) ★
+                    "entry.1200084478": str(comm_rate)                   # 歩合率 (G列)   ★
                 }
                 
                 query_string = urllib.parse.urlencode(params)
