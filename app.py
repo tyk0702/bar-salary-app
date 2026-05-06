@@ -4,21 +4,18 @@ from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
 import urllib.parse
 
-# --- Googleスプレッドシートへの接続設定 ---
+# --- スプレッドシート接続 ---
 conn = st.connection("google_sheets", type=GSheetsConnection)
 
 # --- サイドバー ---
 st.sidebar.title("メニュー")
 mode = st.sidebar.radio("機能を選択", ["日々の入力をする", "1週間の集計を出す"])
 
-# ---------------------------------------------------------
-# モード1：日々の入力をする
-# ---------------------------------------------------------
 if mode == "日々の入力をする":
     st.title("📝 今日の出勤データを記入")
     
+    # フォーム開始
     with st.form("input_form"):
-        # この日付がスプレッドシートのB列に反映されます
         input_date = st.date_input("日付", datetime.now())
         name = st.text_input("名前（スタッフ名）")
         hourly_rate = st.number_input("基本時給", value=1200)
@@ -26,29 +23,31 @@ if mode == "日々の入力をする":
         sales = st.number_input("今日の売上", value=0)
         comm_rate = st.number_input("歩合率", value=0.1)
         
+        # 【重要】ここで変数を定義（これが if submitted の上にないとダメ！）
         submitted = st.form_submit_button("送信リンクを準備する")
         
-if submitted:
+        # ここから下が「送信ボタン」が押された後の処理
+        if submitted:
             if name == "":
                 st.error("名前を入力してください！")
             else:
                 form_url = "https://docs.google.com/forms/d/e/1FAIpQLSc8Ost1yA_FAtXskdxt_8twu6vigBE3FEXBkH8Hw8rF8FRikw/formResponse"
                 
-                # 文字列として安全に送る
+                # 記述式にしたので ID ひとつに YYYY-MM-DD を流し込む
                 params = {
                     "entry.474978113": str(name),
                     "entry.223259871": str(hourly_rate),
                     "entry.1496582745": str(hours),
                     "entry.640486226": str(sales),
                     "entry.1975425774": str(comm_rate),
-                    "entry.480614532": input_date.strftime("%Y-%m-%d") # ここがB列に届くはず
+                    "entry.480614532": input_date.strftime("%Y-%m-%d") 
                 }
                 
                 query_string = urllib.parse.urlencode(params)
                 complete_url = f"{form_url}?{query_string}&submit=Submit"
                 
-                st.success("✅ 送信ボタンを準備しました")
-                st.link_button("🚀 スプレッドシートに保存（ここを必ずクリック）", complete_url)
+                st.success("✅ 送信ボタンの準備ができました")
+                st.link_button("🚀 スプレッドシートに保存（ここをクリック！）", complete_url)
 
 # ---------------------------------------------------------
 # モード2：1週間の集計を出す
