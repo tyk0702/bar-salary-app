@@ -27,28 +27,28 @@ if mode == "日々の入力をする":
         submitted = st.form_submit_button("送信リンクを準備する")
         
         # ここから下が「送信ボタン」が押された後の処理
-        if submitted:
+       if submitted:
             if name == "":
                 st.error("名前を入力してください！")
             else:
                 form_url = "https://docs.google.com/forms/d/e/1FAIpQLSc8Ost1yA_FAtXskdxt_8twu6vigBE3FEXBkH8Hw8rF8FRikw/formResponse"
                 
-                # 記述式にしたので ID ひとつに YYYY-MM-DD を流し込む
-params = {
+                # 最新の「記述式」用ID
+                params = {
                     "entry.474978113": name,
                     "entry.223259871": hourly_rate,
                     "entry.1496582745": hours,
                     "entry.640486226": sales,
                     "entry.1975425774": comm_rate,
-                    "entry.2102143015": input_date.strftime("%Y-%m-%d") # ←ここを最新IDに修正
+                    "entry.2102143015": input_date.strftime("%Y-%m-%d")
                 }
                 
+                # ↓ここの行の先頭の空白を、上のparamsの開始位置と揃えるのがコツです
                 query_string = urllib.parse.urlencode(params)
                 complete_url = f"{form_url}?{query_string}&submit=Submit"
                 
-                st.success("✅ 送信ボタンの準備ができました")
-                st.link_button("🚀 スプレッドシートに保存（ここをクリック！）", complete_url)
-
+                st.success("✅ 送信データの準備完了！")
+                st.link_button("🚀 確定してスプレッドシートに保存", complete_url)
 # ---------------------------------------------------------
 # モード2：1週間の集計を出す
 # ---------------------------------------------------------
