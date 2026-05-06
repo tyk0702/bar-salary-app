@@ -34,17 +34,14 @@ if submitted:
             else:
                 form_url = "https://docs.google.com/forms/d/e/1FAIpQLSc8Ost1yA_FAtXskdxt_8twu6vigBE3FEXBkH8Hw8rF8FRikw/formResponse"
                 
-                # 日付を「年」「月」「日」に分解してパラメータを作成
+                # 日付を文字列（YYYY-MM-DD）として送信
                 params = {
                     "entry.474978113": name,
                     "entry.223259871": hourly_rate,
                     "entry.1496582745": hours,
                     "entry.640486226": sales,
                     "entry.1975425774": comm_rate,
-                    # 日付IDに _year, _month, _day を付けて送信
-                    "entry.480614532_year": input_date.year,
-                    "entry.480614532_month": input_date.month,
-                    "entry.480614532_day": input_date.day
+                    "entry.480614532": input_date.strftime("%Y-%m-%d") # 記述式ならこれで届く
                 }
                 
                 query_string = urllib.parse.urlencode(params)
