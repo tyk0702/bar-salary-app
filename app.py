@@ -27,33 +27,38 @@ if mode == "日々の入力をする":
         
         submitted = st.form_submit_button("データを保存する")
         
-        if submitted:
+       if submitted:
             if name == "":
                 st.error("名前を入力してください！")
             else:
                 try:
-                    # スプレッドシートの各列に対応するデータリストを作成
-                    # A:タイムスタンプ, B:日付, C:名前, D:時給, E:時間, F:売上, G:歩合
-                    new_row = [
-                        datetime.now().strftime("%Y/%m/%d %H:%M:%S"),
-                        input_date.strftime("%Y/%m/%d"),
-                        name,
-                        hourly_rate,
-                        hours,
-                        sales,
-                        comm_rate
-                    ]
+                    # 1. 現在の全データを読み込む
+                    existing_data = conn.read(ttl=0)
                     
-                    # 直接スプレッドシートに書き込み
-                    # ※ data=[new_row] とリストのリストで渡すのがポイントです
-                    conn.create(data=[new_row])
+                    # 2. 新しい行をデータフレームとして作成
+                    new_row_df = pd.DataFrame([{
+                        "タイムスタンプ": datetime.now().strftime("%Y/%m/%d %H:%M:%S"),
+                        "日付": input_date.strftime("%Y/%m/%d"),
+                        "名前": name,
+                        "時給": hourly_rate,
+                        "勤務時間": hours,
+                        "売上": sales,
+                        "歩合率": comm_rate
+                    }])
+                    
+                    # 3. 既存のデータと新しい行を結合
+                    updated_df = pd.concat([existing_data, new_row_df], ignore_index=True)
+                    
+                    # 4. スプレッドシート全体を更新（これが最もエラーが少ない方法です）
+                    conn.update(data=updated_df)
                     
                     st.cache_data.clear()
                     st.success(f"{name}さんのデータを保存しました！")
                     st.balloons()
                 except Exception as e:
-                    st.error(f"保存に失敗しました。スプレッドシートの権限（編集者になっているか）を確認してください: {e}")
-
+                    st.error("保存に失敗しました。")
+                    with st.expander("詳細なエラー内容"):
+                        st.exception(e)
 # ---------------------------------------------------------
 # モード2：1週間の集計を出す
 # ---------------------------------------------------------
