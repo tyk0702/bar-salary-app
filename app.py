@@ -68,7 +68,6 @@ if mode == "日々の入力をする":
 elif mode == "1週間の集計を出す":
     st.title("📊 スタッフ別・週次集計")
     
-    # 最新データを取得
     df_raw = conn.read(ttl=0) 
     
     if df_raw is not None and not df_raw.empty:
@@ -77,51 +76,51 @@ elif mode == "1週間の集計を出す":
         
         st.info(f"スプレッドシートから {len(df)} 行読み込みました。")
 
-        # 列の位置を固定（0:タイムスタンプ, 1:日付, 2:名前...）
         cols_count = len(df.columns)
         processed_rows = []
 
         for i in range(len(df)):
-            row = df.iloc[i]
+            # row = df.iloc[i] ではなく、値を直接取得するように変更
             
-            # --- 日付の解析 (B列を優先、ダメならA列) ---
-            raw_date = str(row[1]) if cols_count > 1 else ""
-            raw_ts = str(row[0])
-            
-            # どんな形式でも日付に変える魔法の関数
-            parsed_date = pd.to_datetime(raw_date, errors='coerce')
-            if pd.isna(parsed_date):
-                parsed_date = pd.to_datetime(raw_ts, errors='coerce')
-            
-            # 日付が取れなかったらその行は捨てる
-            if pd.isna(parsed_date):
-                continue
-                
-            # --- データの抽出 ---
+            # --- 日付の解析 (0番目がタイムスタンプ、1番目が日付) ---
+            # .iat[i, 列番号] を使うことで、KeyErrorを物理的に回避します
             try:
+                raw_ts = str(df.iat[i, 0])
+                raw_date = str(df.iat[i, 1]) if cols_count > 1 else ""
+                
+                # 日付変換
+                parsed_date = pd.to_datetime(raw_date, errors='coerce')
+                if pd.isna(parsed_date):
+                    parsed_date = pd.to_datetime(raw_ts, errors='coerce')
+                
+                if pd.isna(parsed_date):
+                    continue
+                    
+                # --- データの抽出 (位置で指定) ---
                 processed_rows.append({
                     '確定日付': parsed_date,
-                    '名前': str(row[2]) if cols_count > 2 else "不明",
-                    '時給': pd.to_numeric(str(row[3]).replace(',', ''), errors='coerce') or 0,
-                    '勤務時間': pd.to_numeric(str(row[4]).replace(',', ''), errors='coerce') or 0,
-                    '個人売上': pd.to_numeric(str(row[5]).replace(',', ''), errors='coerce') or 0,
-                    '歩合率': pd.to_numeric(str(row[6]).replace(',', ''), errors='coerce') or 0
+                    '名前': str(df.iat[i, 2]) if cols_count > 2 else "不明",
+                    '時給': pd.to_numeric(str(df.iat[i, 3]).replace(',', ''), errors='coerce') or 0,
+                    '勤務時間': pd.to_numeric(str(df.iat[i, 4]).replace(',', ''), errors='coerce') or 0,
+                    '個人売上': pd.to_numeric(str(df.iat[i, 5]).replace(',', ''), errors='coerce') or 0,
+                    '歩合率': pd.to_numeric(str(df.iat[i, 6]).replace(',', ''), errors='coerce') or 0
                 })
-            except:
+            except Exception as e:
+                # 1行失敗しても次に進む
                 continue
 
         final_df = pd.DataFrame(processed_rows)
 
         if final_df.empty:
-            st.error("有効なデータが1件も見つかりませんでした。スプレッドシートの形式を確認してください。")
-            with st.expander("生データの中身"):
-                st.write(df.head())
+            st.error("有効なデータが1件も見つかりませんでした。")
+            with st.expander("読み込んだ列名を確認"):
+                st.write(list(df.columns))
         else:
-            # 週の計算（日曜始まり）
+            # 週の計算
             final_df['週開始'] = final_df['確定日付'].apply(lambda x: x - pd.Timedelta(days=(x.weekday() + 1) % 7))
             final_df['週ラベル'] = final_df['週開始'].dt.strftime('%Y-%m-%d (日)〜')
 
-            st.success(f"{len(final_df)} 件の日付を認識しました！")
+            st.success(f"{len(final_df)} 件のデータを処理しました！")
 
             all_weeks = sorted(final_df['週ラベル'].unique(), reverse=True)
             selected_week = st.selectbox("集計する週を選択してください", all_weeks)
@@ -129,9 +128,9 @@ elif mode == "1週間の集計を出す":
             week_df = final_df[final_df['週ラベル'] == selected_week].copy()
 
             if not week_df.empty:
-                # 計算
-                week_df['時給計算'] = week_df['時給'] * week_df['勤務時間']
-                week_df['歩合計算'] = week_df['個人売上'] * week_df['歩合率']
+                # 計算（エラーが出にくいよう型を明示）
+                week_df['時給計算'] = week_df['時給'].astype(float) * week_df['勤務時間'].astype(float)
+                week_df['歩合計算'] = week_df['個人売上'].astype(float) * week_df['歩合率'].astype(float)
                 
                 summary = week_df.groupby('名前').agg({
                     '勤務時間': 'sum', '個人売上': 'sum', '時給計算': 'sum', '歩合計算': 'sum'
@@ -141,5 +140,12 @@ elif mode == "1週間の集計を出す":
                 summary['計算方法'] = summary.apply(lambda x: "歩合" if x['歩合計算'] > x['時給計算'] else "時給保障", axis=1)
 
                 st.dataframe(summary)
-            else:
-                st.info("データがありません。")
+                
+                # 詳細表示
+                st.divider()
+                target_staff = st.selectbox("詳細を確認するスタッフ", summary['名前'])
+                p = summary[summary['名前'] == target_staff].iloc[0]
+                c1, c2, c3 = st.columns(3)
+                c1.metric("実働合計", f"{p['勤務時間']}h")
+                c2.metric("売上合計", f"{int(p['個人売上']):,}円")
+                c3.metric("確定給料", f"{int(p['最終支給額']):,}円")
