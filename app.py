@@ -36,13 +36,14 @@ if mode == "日々の入力をする":
                 
                 # 新しいフォームから抜き出した最新ID
                 # --- 【最新】売上（回答）.xlsx の列順に100%合わせたID ---
+                # --- 【最終手段】型変換を外した、生データ送信セット ---
                 params = {
-                    "entry.2065842886": input_date.strftime("%Y-%m-%d"), # 日付 (B列)
-                    "entry.1983050011": str(name),                       # 名前 (C列)
-                    "entry.137452632": str(hourly_rate),                 # 時給 (D列)
-                    "entry.347515091": str(hours),                       # 勤務時間 (E列)
-                    "entry.1975425774": str(sales),                      # 個人売上 (F列) ★
-                    "entry.1200084478": str(comm_rate)                   # 歩合率 (G列)   ★
+                    "entry.2065842886": input_date.strftime("%Y-%m-%d"), # 日付
+                    "entry.1983050011": name,           # 名前 (そのまま)
+                    "entry.137452632": hourly_rate,     # 基本時給 (数値のまま)
+                    "entry.347515091": hours,           # 勤務時間 (数値のまま)
+                    "entry.1200084478": sales,          # 売上 (数値のまま)
+                    "entry.1030999587": comm_rate       # 歩合率 (数値のまま)
                 }
                 
                 query_string = urllib.parse.urlencode(params)
