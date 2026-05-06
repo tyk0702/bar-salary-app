@@ -31,24 +31,24 @@ if mode == "日々の入力をする":
             if not name:
                 st.error("名前を入力してください")
             else:
-                form_url = "https://docs.google.com/forms/d/e/1FAIpQLSc8Ost1yA_FAtXskdxt_8twu6vigBE3FEXBkH8Hw8rF8FRikw/formResponse"
+                # 新しいフォームの送信先URL
+                form_url = "https://docs.google.com/forms/d/e/1FAIpQLSdO7S26lMv0P0T9N8Z1iFh6D_4A7f98T2v9V0D-x_X_L8X-Qw/formResponse"
                 
-                # すべての値を str() で囲い、フォーム側の受け入れ態勢を確実にします
+                # 新しいフォームから抜き出した最新ID
                 params = {
-                    "entry.1983050011": str(name),
-                    "entry.137452632": str(hourly_rate),
-                    "entry.347515091": str(hours),
-                    "entry.1030999587": str(sales),
-                    "entry.2095030248": str(comm_rate),
-                    "entry.1200084478": input_date.strftime("%Y-%m-%d")
+                    "entry.2065842886": input_date.strftime("%Y-%m-%d"), # 日付
+                    "entry.1030999587": str(name),                       # 名前
+                    "entry.137452632": str(hourly_rate),                 # 基本時給
+                    "entry.347515091": str(hours),                       # 勤務時間
+                    "entry.1983050011": str(sales),                      # 売上
+                    "entry.1200084478": str(comm_rate)                   # 歩合率
                 }
                 
                 query_string = urllib.parse.urlencode(params)
                 complete_url = f"{form_url}?{query_string}&submit=Submit"
                 
-                st.success("✅ 送信準備が整いました")
-                st.link_button("🚀 スプレッドシートに保存", complete_url)
-                
+                st.success("✅ 送信準備が整いました！")
+                st.link_button("🚀 スプレッドシートに保存（ここを必ずクリック）", complete_url)
 # ---------------------------------------------------------
 # モード2：1週間の集計を出す
 # ---------------------------------------------------------
