@@ -68,70 +68,62 @@ if mode == "日々の入力をする":
 elif mode == "1週間の集計を出す":
     st.title("📊 スタッフ別・週次集計")
     
-    # 【修正】ttl=0 を指定してキャッシュを無効化し、常に最新のスプレッドシートを読み込む
     df_raw = conn.read(ttl=0) 
     
     if df_raw is not None and not df_raw.empty:
-        # 重複列の削除
+        # 重複削除
         df = df_raw.loc[:, ~df_raw.columns.duplicated()].copy()
         
-        # 【修正】名前で列を特定する（位置がズレても大丈夫なように）
-        # スプレッドシートの列名に含まれるキーワードで探します
-        def find_col(keywords, default_idx):
-            for col in df.columns:
-                if any(k in str(col) for k in keywords):
-                    return col
-            return df.columns[default_idx] if len(df.columns) > default_idx else None
+        # --- デバッグ情報 ---
+        st.info(f"スプレッドシートから {len(df)} 行のデータを読み込みました。")
 
-        col_map = {
-            'timestamp': find_col(['タイムスタンプ'], 0),
-            'date': find_col(['日付'], 1),
-            'name': find_col(['名前'], 2),
-            'salary': find_col(['時給'], 3),
-            'hours': find_col(['勤務時間'], 4),
-            'sales': find_col(['個人売上'], 5),
-            'rate': find_col(['歩合率'], 6)
-        }
-
-        # 新しいデータフレームの構築
+        # 列の位置固定（0:TS, 1:日付, 2:名前, 3:時給, 4:時間, 5:売上, 6:歩合）
+        cols_count = len(df.columns)
         final_df = pd.DataFrame()
-        final_df['名前'] = df[col_map['name']]
         
-        # 日付の確定（「日付」列を最優先、空なら「タイムスタンプ」）
-        date_col = pd.to_datetime(df[col_map['date']], errors='coerce')
-        time_col = pd.to_datetime(df[col_map['timestamp']], errors='coerce')
-        final_df['確定日付'] = date_col.fillna(time_col)
+        # 1. タイムスタンプと日付の取得（形式を問わず無理やり変換）
+        ts_raw = pd.to_datetime(df.iloc[:, 0], errors='coerce')
         
-        # 数値変換
-        final_df['時給'] = pd.to_numeric(df[col_map['salary']], errors='coerce').fillna(0)
-        final_df['勤務時間'] = pd.to_numeric(df[col_map['hours']], errors='coerce').fillna(0)
-        final_df['個人売上'] = pd.to_numeric(df[col_map['sales']], errors='coerce').fillna(0)
-        final_df['歩合率'] = pd.to_numeric(df[col_map['rate']], errors='coerce').fillna(0)
-
-        # 日付がない行を削除
-        final_df = final_df.dropna(subset=['確定日付']).copy()
-
-        # 週のラベル作成
-        final_df['週開始'] = final_df['確定日付'].apply(lambda x: x - pd.Timedelta(days=(x.weekday() + 1) % 7))
-        final_df['週ラベル'] = final_df['週開始'].dt.strftime('%Y-%m-%d (日)〜')
-
-        week_list = sorted(final_df['週ラベル'].unique(), reverse=True)
-        
-        if not week_list:
-            st.warning("集計できる日付データがスプレッドシートに見つかりません。")
-            # デバッグ用に読み込んだ列名を表示
-            st.write("現在認識している列名:", list(df.columns))
+        if cols_count > 1:
+            # B列を日付として変換。dayfirst=False, yearfirst=Trueなど柔軟に対応
+            date_raw = pd.to_datetime(df.iloc[:, 1], errors='coerce')
+            # B列が空ならA列（タイムスタンプ）を使う
+            final_df['確定日付'] = date_raw.fillna(ts_raw)
         else:
-            selected_week = st.selectbox("集計する週を選択してください", week_list)
+            final_df['確定日付'] = ts_raw
+            
+        # 2. その他の列を位置で取得
+        final_df['名前'] = df.iloc[:, 2].fillna("不明") if cols_count > 2 else "不明"
+        final_df['時給'] = pd.to_numeric(df.iloc[:, 3], errors='coerce').fillna(0) if cols_count > 3 else 0
+        final_df['勤務時間'] = pd.to_numeric(df.iloc[:, 4], errors='coerce').fillna(0) if cols_count > 4 else 0
+        final_df['個人売上'] = pd.to_numeric(df.iloc[:, 5], errors='coerce').fillna(0) if cols_count > 5 else 0
+        final_df['歩合率'] = pd.to_numeric(df.iloc[:, 6], errors='coerce').fillna(0) if cols_count > 6 else 0
+
+        # 日付がどうしても取れない行を除外（ここでデータが消えていないかチェック）
+        final_df = final_df.dropna(subset=['確定日付']).copy()
+        st.write(f"📅 日付が正しく認識されたデータ: {len(final_df)} 行")
+
+        if len(final_df) == 0:
+            st.error("スプレッドシートの1列目または2列目から日付が読み取れませんでした。形式（2026/05/10など）を再確認してください。")
+        else:
+            # 週の計算（日曜始まり）
+            final_df['週開始'] = final_df['確定日付'].apply(lambda x: x - pd.Timedelta(days=(x.weekday() + 1) % 7))
+            final_df['週ラベル'] = final_df['週開始'].dt.strftime('%Y-%m-%d (日)〜')
+
+            # 全週のリストを表示
+            all_weeks = sorted(final_df['週ラベル'].unique(), reverse=True)
+            selected_week = st.selectbox("集計する週を選択してください", all_weeks)
+            
             week_df = final_df[final_df['週ラベル'] == selected_week].copy().reset_index(drop=True)
 
             if not week_df.empty:
                 st.write(f"### {selected_week} の集計")
-
-                # 計算
-                week_df['時給計算'] = week_df['時給'] * week_df['勤務時間']
-                week_df['歩合計算'] = week_df['個人売上'] * week_df['歩合率']
                 
+                # 計算
+                week_df['時給計算'] = week_df['時給'].values * week_df['勤務時間'].values
+                week_df['歩合計算'] = week_df['個人売上'].values * week_df['歩合率'].values
+                
+                # 集計処理
                 summary = week_df.groupby('名前').agg({
                     '勤務時間': 'sum', '個人売上': 'sum', '時給計算': 'sum', '歩合計算': 'sum'
                 }).reset_index()
@@ -140,14 +132,12 @@ elif mode == "1週間の集計を出す":
                 summary['計算方法'] = summary.apply(lambda x: "歩合" if x['歩合計算'] > x['時給計算'] else "時給保障", axis=1)
 
                 st.dataframe(summary)
+            else:
+                st.info("この週に該当するデータはありません。")
 
-                st.divider()
-                target_staff = st.selectbox("詳細を確認するスタッフ", summary['名前'])
-                p = summary[summary['名前'] == target_staff].iloc[0]
-                
-                c1, c2, c3 = st.columns(3)
-                c1.metric("実働合計", f"{p['勤務時間']}h")
-                c2.metric("売上合計", f"{int(p['個人売上']):,}円")
-                c3.metric("確定給料", f"{int(p['最終支給額']):,}円")
+        # 生データ確認用（トラブル時のみ展開）
+        with st.expander("詳細な読み込み状況を確認"):
+            st.write("スプレッドシートの生のカラム名:", list(df.columns))
+            st.write("加工後のデータプレビュー:", final_df.head())
     else:
         st.warning("スプレッドシートからデータが読み込めません。")
