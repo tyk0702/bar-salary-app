@@ -72,10 +72,12 @@ elif mode == "1週間の集計を出す":
     df = conn.read(ttl=0) 
     
     if df is not None and not df.empty:
+        # --- 重複列名の解消 ---
+        # 全く同じ名前の列がある場合、強制的にユニークな名前に変更する
+        df = df.loc[:, ~df.columns.duplicated()].copy()
+
         # --- 列名の整理 ---
-        # フォームからの入力で列名が変わっても対応できるように強制代入
         standard_cols = ['タイムスタンプ', '名前', '時給', '勤務時間', '個人売上', '歩合率']
-        # 現在の列名を取得
         actual_cols = list(df.columns)
         
         # 存在する列の数だけ名前を付け直す
@@ -90,12 +92,12 @@ elif mode == "1週間の集計を出す":
         df['タイムスタンプ'] = pd.to_datetime(df['タイムスタンプ'], errors='coerce')
         df = df.dropna(subset=['タイムスタンプ']) 
         
-        # 数値変換（より安全な方法に変更）
+        # 数値変換（1つずつ確実に変換）
         num_cols = ['時給', '勤務時間', '個人売上', '歩合率']
         for col in num_cols:
             if col in df.columns:
-                # 1つずつ値を数値に変換し、失敗したら0にする
-                df[col] = df[col].apply(pd.to_numeric, errors='coerce').fillna(0)
+                # 重複エラーを避けるため、Seriesとして取得して変換
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             else:
                 df[col] = 0
 
@@ -113,8 +115,14 @@ elif mode == "1週間の集計を出す":
             st.write(f"### {selected_week} の集計")
 
             # --- 計算処理 ---
-            week_df['時給計算'] = week_df['時給'] * week_df['勤務時間']
-            week_df['歩合計算'] = week_df['個人売上'] * week_df['歩合率']
+            # シリーズ同士の計算にすることで reindex エラーを回避
+            sales_ser = week_df['個人売上'].reset_index(drop=True)
+            rate_ser = week_df['歩合率'].reset_index(drop=True)
+            hour_ser = week_df['時給'].reset_index(drop=True)
+            work_hour_ser = week_df['勤務時間'].reset_index(drop=True)
+
+            week_df['時給計算'] = (hour_ser * work_hour_ser).values
+            week_df['歩合計算'] = (sales_ser * rate_ser).values
             
             # スタッフごとに合計
             summary = week_df.groupby('名前').agg({
@@ -124,22 +132,22 @@ elif mode == "1週間の集計を出す":
                 '歩合計算': 'sum'
             }).reset_index()
 
-            # 給料の決定（高い方を採用）
+            # 給料の決定
             summary['最終支給額'] = summary.apply(lambda x: max(x['時給計算'], x['歩合計算']), axis=1)
             summary['計算方法'] = summary.apply(lambda x: "歩合" if x['歩合計算'] > x['時給計算'] else "時給保障", axis=1)
 
-            # 表示
             st.dataframe(summary[['名前', '勤務時間', '個人売上', '最終支給額', '計算方法']])
 
             st.divider()
-            target_staff = st.selectbox("詳細を確認するスタッフ", summary['名前'])
-            personal = summary[summary['名前'] == target_staff].iloc[0]
-                
-            st.write(f"#### {target_staff} さんの詳細")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("実働合計", f"{personal['勤務時間']}h")
-            c2.metric("売上合計", f"{int(personal['個人売上']):,}円")
-            c3.metric("確定給料", f"{int(personal['最終支給額']):,}円")
+            if not summary.empty:
+                target_staff = st.selectbox("詳細を確認するスタッフ", summary['名前'])
+                personal = summary[summary['名前'] == target_staff].iloc[0]
+                    
+                st.write(f"#### {target_staff} さんの詳細")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("実働合計", f"{personal['勤務時間']}h")
+                c2.metric("売上合計", f"{int(personal['個人売上']):,}円")
+                c3.metric("確定給料", f"{int(personal['最終支給額']):,}円")
         else:
             st.info("選択された週にデータはありません。")
     else:
