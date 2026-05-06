@@ -5,7 +5,7 @@ from streamlit_gsheets import GSheetsConnection
 import requests
 
 # --- Googleスプレッドシートへの接続設定（読み込み用） ---
-conn = st.connection("gsheets", type=GSheetsConnection)
+conn = st.connection("google_sheets", type=GSheetsConnection)
 
 # --- サイドバー ---
 st.sidebar.title("メニュー")
