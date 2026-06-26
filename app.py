@@ -1,8 +1,8 @@
 import streamlit as st
-import pandas as pd
 from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
-import urllib.parse
+
+from salary import add_week_columns, build_submission_url, normalize_work_records, summarize_salary
 
 # --- Googleスプレッドシートへの接続設定 ---
 conn = st.connection("google_sheets", type=GSheetsConnection)
@@ -24,31 +24,21 @@ if mode == "日々の入力をする":
         hours = st.number_input("勤務時間", value=0.0, step=0.5)
         sales = st.number_input("売上", value=0)
         comm_rate = st.number_input("歩合率", value=0.1)
-        
+
         submitted = st.form_submit_button("データを送信する")
-        
+
         if submitted:
-            if not name:
+            if not name.strip():
                 st.error("名前を入力してください")
             else:
-                # 新しいフォームの送信先URL
-                form_url = "https://docs.google.com/forms/d/e/1FAIpQLScNydbSJ03cCZd4_rs56zaq-CDSqRa5wVp5d_D1nqZTkYZ7Cg/formResponse"
-                
-                # 新しいフォームから抜き出した最新ID
-                # --- 【最新】売上（回答）.xlsx の列順に100%合わせたID ---
-                # --- 【最終手段】型変換を外した、生データ送信セット ---
-                params = {
-                    "entry.2065842886": input_date.strftime("%Y-%m-%d"), # 日付
-                    "entry.1983050011": name,           # 名前 (そのまま)
-                    "entry.137452632": hourly_rate,     # 基本時給 (数値のまま)
-                    "entry.347515091": hours,           # 勤務時間 (数値のまま)
-                    "entry.1200084478": sales,          # 売上 (数値のまま)
-                    "entry.1030999587": comm_rate       # 歩合率 (数値のまま)
-                }
-                
-                query_string = urllib.parse.urlencode(params)
-                complete_url = f"{form_url}?{query_string}&submit=Submit"
-                
+                complete_url = build_submission_url(
+                    input_date,
+                    name,
+                    hourly_rate,
+                    hours,
+                    sales,
+                    comm_rate,
+                )
                 st.success("✅ 送信準備が整いました！")
                 st.link_button("🚀 スプレッドシートに保存（ここを必ずクリック）", complete_url)
 # ---------------------------------------------------------
@@ -58,61 +48,19 @@ elif mode == "1週間の集計を出す":
     st.title("📊 スタッフ別・週次集計")
     
     # データを最新状態で読み込み
-    df_raw = conn.read(ttl=0) 
-    
+    df_raw = conn.read(ttl=0)
+
     if df_raw is not None and not df_raw.empty:
-        # 列の重複を排除
-        df = df_raw.loc[:, ~df_raw.columns.duplicated()].copy()
-        processed_rows = []
-        cols_count = len(df.columns)
-
-        for i in range(len(df)):
-            try:
-                # 0番目がタイムスタンプ(A列)、1番目が入力した日付(B列)
-                raw_ts = str(df.iat[i, 0])
-                raw_date = str(df.iat[i, 1]) if cols_count > 1 else ""
-                
-                # B列の日付を優先、なければA列のタイムスタンプを使用
-                parsed_date = pd.to_datetime(raw_date, errors='coerce')
-                if pd.isna(parsed_date):
-                    parsed_date = pd.to_datetime(raw_ts, errors='coerce')
-                
-                if pd.isna(parsed_date): continue
-                    
-                processed_rows.append({
-                    '確定日付': parsed_date,
-                    '名前': str(df.iat[i, 2]) if cols_count > 2 else "不明",
-                    '時給': pd.to_numeric(str(df.iat[i, 3]).replace(',', ''), errors='coerce') or 0,
-                    '勤務時間': pd.to_numeric(str(df.iat[i, 4]).replace(',', ''), errors='coerce') or 0,
-                    '個人売上': pd.to_numeric(str(df.iat[i, 5]).replace(',', ''), errors='coerce') or 0,
-                    '歩合率': pd.to_numeric(str(df.iat[i, 6]).replace(',', ''), errors='coerce') or 0
-                })
-            except:
-                continue
-
-        final_df = pd.DataFrame(processed_rows)
+        final_df = add_week_columns(normalize_work_records(df_raw))
 
         if not final_df.empty:
-            # 週の開始日（日曜日）を計算
-            final_df['週開始'] = final_df['確定日付'].apply(lambda x: x - pd.Timedelta(days=(x.weekday() + 1) % 7))
-            final_df['週ラベル'] = final_df['週開始'].dt.strftime('%Y-%m-%d (日)〜')
-
             all_weeks = sorted(final_df['週ラベル'].unique(), reverse=True)
             selected_week = st.selectbox("集計する週を選択してください", all_weeks)
-            
+
             week_df = final_df[final_df['週ラベル'] == selected_week].copy()
 
             if not week_df.empty:
-                # 給与計算（時給 vs 歩合 の高い方）
-                week_df['時給計算'] = week_df['時給'].astype(float) * week_df['勤務時間'].astype(float)
-                week_df['歩合計算'] = week_df['個人売上'].astype(float) * week_df['歩合率'].astype(float)
-                
-                summary = week_df.groupby('名前').agg({
-                    '勤務時間': 'sum', '個人売上': 'sum', '時給計算': 'sum', '歩合計算': 'sum'
-                }).reset_index()
-
-                summary['最終支給額'] = summary.apply(lambda x: max(x['時給計算'], x['歩合計算']), axis=1)
-                summary['計算方法'] = summary.apply(lambda x: "歩合" if x['歩合計算'] > x['時給計算'] else "時給保障", axis=1)
+                summary = summarize_salary(week_df)
 
                 # 結果表示
                 st.subheader(f"📅 {selected_week} の集計結果")

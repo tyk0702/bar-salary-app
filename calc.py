@@ -1,34 +1,44 @@
+import argparse
+
 import pandas as pd
 
-# 1. CSVファイルを読み込む（ファイル名は適宜変えてください）
-# encoding='utf-8' でエラーが出る場合は 'shift-jis' に変えてみてください
-df = pd.read_csv('bar.csv', encoding='utf-8')
+from salary import calculate_salary, to_number
 
-# 2. 給料計算のロジックを作成
-def calculate_salary(row):
-    # A案：時給計算（時給 × 勤務時間）
-    hourly_pay = row['時給'] * row['勤務時間']
-    
-    # B案：売上歩合（個人売上 × 歩合率）
-    # 歩合率は 0.1 (10%) のような数値を想定
-    commission_pay = row['個人売上'] * row['歩合率']
-    
-    # 高い方を採用
-    final_pay = max(hourly_pay, commission_pay)
-    return final_pay
 
-# 3. 新しい列「支給額」を追加して計算を実行
-df['支給額'] = df.apply(calculate_salary, axis=1)
+def main() -> None:
+    parser = argparse.ArgumentParser(description="BARの給料CSVを計算します。")
+    parser.add_argument("input", nargs="?", default="bar_history.csv", help="入力CSV")
+    parser.add_argument("-o", "--output", default="salary_result.csv", help="出力CSV")
+    args = parser.parse_args()
 
-# 4. 結果を表示
-print("--- 個別計算結果 ---")
-print(df[['名前', '勤務時間', '個人売上', '支給額']])
+    df = pd.read_csv(args.input, encoding="utf-8")
+    required_columns = ["名前", "時給", "勤務時間", "個人売上", "歩合率"]
+    missing_columns = [column for column in required_columns if column not in df.columns]
+    if missing_columns:
+        raise SystemExit(f"必要な列がありません: {', '.join(missing_columns)}")
 
-print("\n--- 1週間の合計 ---")
-print(f"総勤務時間: {df['勤務時間'].sum()} 時間")
-print(f"総個人売上: {df['個人売上'].sum()} 円")
-print(f"総支給額: {df['支給額'].sum()} 円")
+    for column in ["時給", "勤務時間", "個人売上", "歩合率"]:
+        df[column] = df[column].apply(to_number)
 
-# 5. 結果を新しいCSVとして保存（オーナーに渡す用）
-df.to_csv('salary_result.csv', index=False, encoding='utf-8-sig')
-print("\n計算結果を 'salary_result.csv' に保存しました！")
+    df["支給額"] = df.apply(
+        lambda row: calculate_salary(row["時給"], row["勤務時間"], row["個人売上"], row["歩合率"]),
+        axis=1,
+    )
+
+    print("--- 個別計算結果 ---")
+    if df.empty:
+        print("データがありません。")
+    else:
+        print(df[["名前", "勤務時間", "個人売上", "支給額"]])
+
+    print("\n--- 合計 ---")
+    print(f"総勤務時間: {df['勤務時間'].sum()} 時間")
+    print(f"総個人売上: {int(df['個人売上'].sum()):,} 円")
+    print(f"総支給額: {int(df['支給額'].sum()):,} 円")
+
+    df.to_csv(args.output, index=False, encoding="utf-8-sig")
+    print(f"\n計算結果を '{args.output}' に保存しました。")
+
+
+if __name__ == "__main__":
+    main()
